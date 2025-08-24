@@ -1504,6 +1504,13 @@ class BattleWebServer:
 
                     // Clear moves list
                     document.getElementById('movesContent').innerHTML = 'No moves yet';
+
+                    // Update game info
+                    document.getElementById('gameInfo').innerHTML = `
+                        <h3>Game Created!</h3>
+                        <p>${whiteText} vs ${blackText}</p>
+                        <p>Click "Start Battle" to begin</p>
+                    `;
                 }
             } catch (error) {
                 alert('Error creating game: ' + error.message);
@@ -1537,6 +1544,13 @@ class BattleWebServer:
                     document.getElementById('startGameBtn').disabled = true;
                     document.getElementById('stopGameBtn').disabled = false;
                     updateGameStatus('Battle in progress!');
+
+                    // Update game info
+                    document.getElementById('gameInfo').innerHTML = `
+                        <h3>Battle in Progress!</h3>
+                        <p>⚔️ AI vs AI Chess Battle</p>
+                        <p>Depth: ${depth}, Time: ${moveTime}s per move</p>
+                    `;
 
                     // Start auto-refresh
                     refreshInterval = setInterval(refreshGameState, 1000);
@@ -1588,9 +1602,23 @@ class BattleWebServer:
                 switch (game.status) {
                     case 'waiting':
                         statusText = 'Waiting to start';
+                        // Update game info for waiting state
+                        document.getElementById('gameInfo').innerHTML = `
+                            <h3>Game Ready</h3>
+                            <p>${game.white_engine} vs ${game.black_engine}</p>
+                            <p>Click "Start Battle" to begin</p>
+                        `;
                         break;
                     case 'playing':
                         statusText = `Battle in progress (${game.moves.length} moves)`;
+                        // Update game info for playing state
+                        const lastMove = game.moves.length > 0 ? game.moves[game.moves.length - 1] : null;
+                        const moveInfo = lastMove ? `Last: ${lastMove.move} by ${lastMove.player}` : 'Starting...';
+                        document.getElementById('gameInfo').innerHTML = `
+                            <h3>⚔️ Battle in Progress!</h3>
+                            <p>${game.white_engine} vs ${game.black_engine}</p>
+                            <p>Move ${Math.ceil(game.moves.length / 2)} • ${moveInfo}</p>
+                        `;
                         break;
                     case 'finished':
                         // Parse and display the result prominently
@@ -1626,6 +1654,13 @@ class BattleWebServer:
                         gameResultDiv.textContent = resultText;
                         gameResultDiv.className = `game-result ${resultClass}`;
                         gameResultDiv.style.display = 'block';
+
+                        // Update game info for finished state
+                        document.getElementById('gameInfo').innerHTML = `
+                            <h3>🏁 Game Finished!</h3>
+                            <p>${game.white_engine} vs ${game.black_engine}</p>
+                            <p>Total moves: ${game.moves.length} • ${game.result}</p>
+                        `;
 
                         if (refreshInterval) {
                             clearInterval(refreshInterval);
