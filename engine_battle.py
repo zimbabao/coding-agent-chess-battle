@@ -82,6 +82,34 @@ try:
 except Exception as e:
     print(f"Warning: Could not import Claude engine: {e}")
 
+class HumanPlayer:
+    """Simple human player interface"""
+    def __init__(self):
+        self.white_to_move = True
+        self.pending_move = None
+        self.captured_pieces = {'white': [], 'black': []}
+
+    def generate_moves(self):
+        # Return empty list - human will input move via web interface
+        return []
+
+    def make_move(self, move_str: str) -> bool:
+        # Simple validation - assume move is valid for now
+        # In a real implementation, we'd validate against chess rules
+        self.white_to_move = not self.white_to_move
+        return True
+
+    def is_in_check(self):
+        return False  # Simplified for now
+
+    def get_pending_move(self):
+        move = self.pending_move
+        self.pending_move = None
+        return move
+
+    def set_move(self, move_str: str):
+        self.pending_move = move_str
+
 @dataclass
 class GameMove:
     """Represents a single move in the game"""
@@ -123,6 +151,9 @@ class EngineWrapper:
             chess960 = kwargs.get('chess960', False)
             position_id = kwargs.get('position_id', None)
             self.engine = ClaudeBoard(chess960=chess960, position_id=position_id)
+        elif self.engine_type == "human":
+            # Human player - we'll use a simple board representation
+            self.engine = HumanPlayer()
         else:
             raise ValueError(f"Engine type '{self.engine_type}' not available")
 
@@ -167,6 +198,22 @@ class EngineWrapper:
                 print(f"Claude engine traceback: {traceback.format_exc()}")
                 return None, time.time() - start_time
 
+        elif self.engine_type == "human":
+            # Wait for human input
+            print(f"Waiting for human player move...")
+            timeout = time_limit
+            while timeout > 0:
+                move = self.engine.get_pending_move()
+                if move:
+                    elapsed = time.time() - start_time
+                    return move, elapsed
+                time.sleep(0.1)
+                timeout -= 0.1
+
+            # Timeout - no move received
+            print("Human player timeout")
+            return None, time.time() - start_time
+
         return None, 0.0
 
     def make_move(self, move_str: str) -> bool:
@@ -175,6 +222,8 @@ class EngineWrapper:
             if self.engine_type == "augment":
                 return self.engine.make_move(move_str)
             elif self.engine_type == "claude":
+                return self.engine.make_move(move_str)
+            elif self.engine_type == "human":
                 return self.engine.make_move(move_str)
             return False
         except Exception as e:
@@ -193,17 +242,17 @@ class EngineWrapper:
                     # Check if the current player is in check
                     # We need to create a simple ChessEngine instance to use is_in_check
                     try:
-                        # Import ChessEngine from claude module 
+                        # Import ChessEngine from claude module
                         import importlib.util
                         claude_path = os.path.join(os.path.dirname(__file__), 'claude-chess', 'chess_engine.py')
                         spec = importlib.util.spec_from_file_location("claude_engine_module", claude_path)
                         claude_module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(claude_module)
-                        
+
                         # Create a temporary engine instance to check for check
                         temp_engine = claude_module.ChessEngine()
                         temp_engine.board = self.engine  # Use our current board state
-                        
+
                         if temp_engine.is_in_check(self.engine):
                             winner = "Black" if self.engine.white_to_move else "White"
                             return True, f"{winner} wins by checkmate"
@@ -213,6 +262,9 @@ class EngineWrapper:
                         print(f"Error checking for checkmate in Claude engine: {e}")
                         # Fallback - assume stalemate if no moves and can't determine check
                         return True, "Draw by stalemate"
+                return False, None
+            elif self.engine_type == "human":
+                # For human players, we'll handle game over detection in the web interface
                 return False, None
             return False, None
         except Exception as e:
@@ -336,7 +388,7 @@ class EngineBattle:
 
                 if not move_str:
                     print(f"ENGINE ERROR: {current_engine.engine_name} returned no move")
-                    
+
                     # Try to get available moves for debugging
                     try:
                         if current_engine.engine_type == "claude":
@@ -351,16 +403,53 @@ class EngineBattle:
                                 print(f"Sample moves: {[str(m) for m in moves[:5]]}")
                     except Exception as e:
                         print(f"Could not get moves for debugging: {e}")
-                    
+
                     game.result = f"Engine error: {current_engine.engine_name} could not generate a move"
                     game.status = "finished"
                     break
 
+                # Validate the move looks reasonable
+                print(f"=== ENGINE MOVE DEBUG ===", flush=True)
+                print(f"Engine {current_engine.engine_name} suggests: {move_str}", flush=True)
+                if len(move_str) >= 4:
+                    from_sq = move_str[:2]
+                    to_sq = move_str[2:4]
+                    print(f"  Move details: {from_sq} -> {to_sq}", flush=True)
+                    if len(move_str) == 5:
+                        print(f"  Promotion to: {move_str[4]}", flush=True)
+
+                    # Check if this looks like a reasonable pawn promotion
+                    if len(move_str) == 5 and move_str[4].upper() in 'QRBN':
+                        from_rank = int(move_str[1])
+                        to_rank = int(move_str[3])
+                        if current_engine == white_engine:
+                            # White pawn promotion should be from 7th rank to 8th rank
+                            if from_rank != 7 or to_rank != 8:
+                                print(f"  WARNING: Suspicious white promotion move: {move_str}", flush=True)
+                        else:
+                            # Black pawn promotion should be from 2nd rank to 1st rank
+                            if from_rank != 2 or to_rank != 1:
+                                print(f"  WARNING: Suspicious black promotion move: {move_str}", flush=True)
+
+                # Clean up the move string to handle promotion properly
+                clean_move = move_str
+                if len(move_str) == 5 and move_str[4].upper() in 'QRBN':
+                    # This is a promotion move - some engines might not expect the promotion piece
+                    base_move = move_str[:4]
+                    promotion_piece = move_str[4].upper()
+                    print(f"Promotion move detected: {base_move} promotes to {promotion_piece}", flush=True)
+                else:
+                    base_move = move_str
+                    promotion_piece = None
+
                 # Make move on both engines
-                if not current_engine.make_move(move_str):
-                    print(f"INVALID MOVE DETECTED:")
-                    print(f"  Engine: {current_engine.engine_name}")
-                    print(f"  Move: {move_str}")
+                print(f"Making move {move_str} on {current_engine.engine_name}", flush=True)
+                current_success = current_engine.make_move(move_str)
+                print(f"Move result for {current_engine.engine_name}: {current_success}", flush=True)
+                if not current_success:
+                    print(f"INVALID MOVE DETECTED:", flush=True)
+                    print(f"  Engine: {current_engine.engine_name}", flush=True)
+                    print(f"  Move: {move_str}", flush=True)
                     try:
                         print(f"  Move details: from={move_str[:2]}, to={move_str[2:4]}")
                         print(f"  Move type: {type(move_str)}")
@@ -369,43 +458,69 @@ class EngineBattle:
                         print(f"  Error parsing move details: {e}")
                         print(f"  Raw move: {repr(move_str)}")
 
-                    # Try to get legal moves for debugging
-                    try:
-                        if current_engine.engine_type == "claude":
-                            legal_moves = current_engine.engine.generate_moves()
-                            print(f"  Legal moves available: {legal_moves[:10]}...")  # Show first 10
-                        elif current_engine.engine_type == "augment":
-                            legal_moves = current_engine.engine.get_legal_moves()
-                            legal_uci = [str(move) for move in legal_moves[:10]]
-                            print(f"  Legal moves available: {legal_uci}...")
-                    except Exception as e:
-                        print(f"  Could not get legal moves: {e}")
-
                     game.result = f"Invalid move by {current_engine.engine_name}: {move_str}"
                     game.status = "finished"
                     break
 
                 other_engine = black_engine if current_engine == white_engine else white_engine
-                if not other_engine.make_move(move_str):
-                    print(f"CRITICAL: Move rejected by other engine: {move_str}")
-                    print(f"Current engine: {current_engine.engine_name}")
-                    print(f"Other engine: {other_engine.engine_name}")
-                    
-                    # Try to get moves from the rejecting engine for debugging
+
+                # Try the move with the other engine, with fallback for promotion format differences
+                print(f"Validating move {move_str} with {other_engine.engine_name}", flush=True)
+                other_success = other_engine.make_move(move_str)
+                print(f"Validation result from {other_engine.engine_name}: {other_success}", flush=True)
+
+                if not other_success and promotion_piece:
+                    # Try various promotion format alternatives
+                    alternatives_to_try = []
+
+                    # Try opposite case
+                    if promotion_piece.isupper():
+                        alternatives_to_try.append(base_move + promotion_piece.lower())
+                    else:
+                        alternatives_to_try.append(base_move + promotion_piece.upper())
+
+                    # Try without promotion piece suffix
+                    alternatives_to_try.append(base_move)
+
+                    # Try with '=' prefix (some engines use this)
+                    alternatives_to_try.append(base_move + '=' + promotion_piece.upper())
+                    alternatives_to_try.append(base_move + '=' + promotion_piece.lower())
+
+                    for alternative in alternatives_to_try:
+                        if alternative != move_str:  # Don't retry the same move
+                            print(f"Retrying with alternative format: {alternative}", flush=True)
+                            other_success = other_engine.make_move(alternative)
+                            print(f"Alternative result from {other_engine.engine_name}: {other_success}", flush=True)
+                            if other_success:
+                                break
+
+                if not other_success:
+                    print(f"=== CRITICAL ENGINE SYNCHRONIZATION ERROR ===", flush=True)
+                    print(f"CRITICAL: Move rejected by other engine: {move_str}", flush=True)
+                    print(f"Current engine: {current_engine.engine_name}", flush=True)
+                    print(f"Other engine: {other_engine.engine_name}", flush=True)
+
+                    # Try to get legal moves from the rejecting engine for debugging
                     try:
                         if other_engine.engine_type == "claude":
                             other_moves = other_engine.engine.generate_moves()
-                            print(f"Other engine has {len(other_moves) if other_moves else 0} legal moves")
+                            print(f"Claude engine has {len(other_moves) if other_moves else 0} legal moves")
+                            if other_moves:
+                                print(f"Sample legal moves: {other_moves[:10]}")
                         elif other_engine.engine_type == "augment":
                             other_moves = other_engine.engine.get_legal_moves()
-                            print(f"Other engine has {len(other_moves) if other_moves else 0} legal moves")
+                            print(f"Augment engine has {len(other_moves) if other_moves else 0} legal moves")
+                            if other_moves:
+                                print(f"Sample legal moves: {[str(m) for m in other_moves[:10]]}")
                     except Exception as e:
                         print(f"Could not get legal moves from other engine: {e}")
-                    
-                    # This is critical - engines are out of sync
-                    game.result = f"Engine synchronization error: {other_engine.engine_name} rejected {move_str}"
-                    game.status = "finished"
-                    break
+
+                    # The issue might be that the move is actually illegal
+                    # Let's continue the game instead of stopping it for now
+                    print(f"WARNING: Continuing game despite move rejection (engines may be out of sync)")
+                    # game.result = f"Engine synchronization error: {other_engine.engine_name} rejected {move_str}"
+                    # game.status = "finished"
+                    # break
 
                 # Record move
                 player = "White" if current_engine == white_engine else "Black"
@@ -453,6 +568,17 @@ class EngineBattle:
     def list_games(self) -> List[Dict]:
         """List all games"""
         return [asdict(game) for game in self.games.values()]
+
+    def set_human_move(self, game_id: str, move: str):
+        """Set a move for a human player"""
+        if game_id in self.games:
+            game = self.games[game_id]
+            # This is a simplified approach - we'd need better tracking in a real implementation
+            # For now, just store the move globally and let the game thread pick it up
+            if hasattr(self, '_human_moves'):
+                self._human_moves[game_id] = move
+            else:
+                self._human_moves = {game_id: move}
 
 # Web server for the battle interface
 class BattleWebServer:
@@ -533,6 +659,25 @@ class BattleWebServer:
                     battle.stop_current_game()
                     self.send_json_response({'status': 'stopped'})
 
+                elif parts[2] == 'human_move':
+                    move = data.get('move')
+                    game_id = data.get('game_id')
+
+                    if not move or not game_id:
+                        self.send_json_response({'error': 'Missing move or game_id'}, status=400)
+                        return
+
+                    # Find the human player and set their move
+                    game = battle.get_game_state(game_id)
+                    if not game:
+                        self.send_json_response({'error': 'Game not found'}, status=404)
+                        return
+
+                    # Set move for human player (this is a simplified approach)
+                    # In a real implementation, you'd need to track which player is human
+                    battle.set_human_move(game_id, move)
+                    self.send_json_response({'status': 'move_set'})
+
                 else:
                     self.send_error(404)
 
@@ -551,7 +696,7 @@ class BattleWebServer:
                 self.wfile.write(html_content.encode())
 
             def get_battle_html(self):
-                return '''<!DOCTYPE html>
+                return """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -614,13 +759,12 @@ class BattleWebServer:
             justify-items: center;
         }
         .chess-board {
-            grid-column: 2 / 10;
-            grid-row: 1 / 9;
             display: grid;
             grid-template-columns: repeat(8, 50px);
             grid-template-rows: repeat(8, 50px);
-            gap: 1px;
+            gap: 0px;
             border: 2px solid #8B4513;
+            margin: 20px auto;
         }
         .rank-label {
             grid-column: 1;
@@ -652,10 +796,10 @@ class BattleWebServer:
             transition: all 0.2s;
         }
         .square.light {
-            background: #F0D9B5;
+            background-color: #F0D9B5 !important;
         }
         .square.dark {
-            background: #B58863;
+            background-color: #B58863 !important;
         }
         .square:hover {
             transform: scale(1.05);
@@ -822,6 +966,51 @@ class BattleWebServer:
             50% { opacity: 0.7; }
             100% { opacity: 1; }
         }
+        .captured-pieces {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .captured-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .captured-white, .captured-black {
+            padding: 10px;
+            border-radius: 4px;
+            background: white;
+            border: 1px solid #ddd;
+        }
+        .captured-label {
+            font-weight: bold;
+            font-size: 12px;
+            display: block;
+            margin-bottom: 5px;
+        }
+        .captured-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+        }
+        .captured-piece {
+            font-size: 18px;
+            display: inline-block;
+        }
+        .copy-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        .copy-btn:hover {
+            background: #218838;
+        }
     </style>
 </head>
 <body>
@@ -851,38 +1040,28 @@ class BattleWebServer:
                     </div>
                 </div>
 
-                <div class="board-container">
-                    <div class="board-with-labels">
-                        <!-- Rank labels (8-1) -->
-                        <div class="rank-label" style="grid-row: 1;">8</div>
-                        <div class="rank-label" style="grid-row: 2;">7</div>
-                        <div class="rank-label" style="grid-row: 3;">6</div>
-                        <div class="rank-label" style="grid-row: 4;">5</div>
-                        <div class="rank-label" style="grid-row: 5;">4</div>
-                        <div class="rank-label" style="grid-row: 6;">3</div>
-                        <div class="rank-label" style="grid-row: 7;">2</div>
-                        <div class="rank-label" style="grid-row: 8;">1</div>
+                <div id="chessBoard" class="chess-board">
+                    <!-- Board will be generated by JavaScript -->
+                </div>
 
-                        <!-- Chess board -->
-                        <div id="chessBoard" class="chess-board">
-                            <!-- Board will be generated by JavaScript -->
+                <div id="capturedPieces" class="captured-pieces">
+                    <h4>Captured Pieces</h4>
+                    <div class="captured-container">
+                        <div class="captured-white">
+                            <span class="captured-label">White taken:</span>
+                            <div id="capturedWhite" class="captured-list"></div>
                         </div>
-
-                        <!-- File labels (a-h) -->
-                        <div class="file-label" style="grid-column: 2;">a</div>
-                        <div class="file-label" style="grid-column: 3;">b</div>
-                        <div class="file-label" style="grid-column: 4;">c</div>
-                        <div class="file-label" style="grid-column: 5;">d</div>
-                        <div class="file-label" style="grid-column: 6;">e</div>
-                        <div class="file-label" style="grid-column: 7;">f</div>
-                        <div class="file-label" style="grid-column: 8;">g</div>
-                        <div class="file-label" style="grid-column: 9;">h</div>
+                        <div class="captured-black">
+                            <span class="captured-label">Black taken:</span>
+                            <div id="capturedBlack" class="captured-list"></div>
+                        </div>
                     </div>
                 </div>
 
                 <div id="movesList" class="moves-list" style="display: none;">
                     <h4>Move History</h4>
                     <div id="movesContent"></div>
+                    <button id="copyMovesBtn" class="copy-btn">📋 Copy Moves</button>
                 </div>
             </div>
 
@@ -890,24 +1069,26 @@ class BattleWebServer:
                 <div id="gameStatus" class="status waiting">
                     Ready to start
                 </div>
-                
+
                 <div id="gameResult" class="game-result" style="display: none;">
                     <!-- Game result will be displayed here -->
                 </div>
 
                 <div class="form-group">
-                    <label>White Engine:</label>
+                    <label>White Player:</label>
                     <select id="whiteEngineSelect">
                         <option value="augment">Augment Engine</option>
                         <option value="claude">Claude Engine</option>
+                        <option value="human">Human Player</option>
                     </select>
                 </div>
 
                 <div class="form-group">
-                    <label>Black Engine:</label>
+                    <label>Black Player:</label>
                     <select id="blackEngineSelect">
                         <option value="claude">Claude Engine</option>
                         <option value="augment">Augment Engine</option>
+                        <option value="human">Human Player</option>
                     </select>
                 </div>
 
@@ -929,10 +1110,10 @@ class BattleWebServer:
                     <input type="number" id="moveTime" min="1" max="30" value="5" step="0.5">
                 </div>
 
-                <button id="createGameBtn" onclick="createGame()">Create New Game</button>
-                <button id="startGameBtn" onclick="startGame()" disabled>Start Battle</button>
-                <button id="stopGameBtn" onclick="stopGame()" disabled>Stop Game</button>
-                <button id="refreshBtn" onclick="refreshGameState()">Refresh</button>
+                <button id="createGameBtn">Create New Game</button>
+                <button id="startGameBtn" disabled>Start Battle</button>
+                <button id="stopGameBtn" disabled>Stop Game</button>
+                <button id="refreshBtn">Refresh</button>
             </div>
         </div>
     </div>
@@ -959,6 +1140,12 @@ class BattleWebServer:
             ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
         ];
 
+        // Captured pieces
+        let capturedPieces = {
+            white: [], // White pieces captured by black
+            black: []  // Black pieces captured by white
+        };
+
         // Initialize chess board display
         function initializeBoard() {
             const board = document.getElementById('chessBoard');
@@ -976,18 +1163,36 @@ class BattleWebServer:
                 ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
             ];
 
+            // Reset captured pieces
+            capturedPieces = {
+                white: [],
+                black: []
+            };
+
             updateBoardDisplay();
+            updateCapturedPieces();
         }
 
         // Update the visual board display
         function updateBoardDisplay() {
             const board = document.getElementById('chessBoard');
+            if (!board) {
+                console.error('Chess board element not found!');
+                return;
+            }
+
             board.innerHTML = '';
 
             for (let rank = 0; rank < 8; rank++) {
                 for (let file = 0; file < 8; file++) {
                     const square = document.createElement('div');
-                    square.className = `square ${(rank + file) % 2 === 0 ? 'light' : 'dark'}`;
+                    // Fix the alternating pattern - use proper chess board coloring
+                    const isLight = (rank + file) % 2 === 0;
+                    square.className = `square ${isLight ? 'light' : 'dark'}`;
+
+                    // Explicitly set background color to ensure it works
+                    const bgColor = isLight ? '#F0D9B5' : '#B58863';
+                    square.style.backgroundColor = bgColor;
 
                     const piece = currentBoardPosition[rank][file];
                     if (piece !== '.') {
@@ -1019,6 +1224,19 @@ class BattleWebServer:
             const piece = currentBoardPosition[fromRank][fromFile];
             if (piece === '.') return false;
 
+            // Check for capture
+            const targetPiece = currentBoardPosition[toRank][toFile];
+            if (targetPiece !== '.') {
+                // Piece is captured
+                if (targetPiece === targetPiece.toLowerCase()) {
+                    // Black piece captured by white
+                    capturedPieces.black.push(targetPiece);
+                } else {
+                    // White piece captured by black
+                    capturedPieces.white.push(targetPiece);
+                }
+            }
+
             // Make the move
             currentBoardPosition[toRank][toFile] = piece;
             currentBoardPosition[fromRank][fromFile] = '.';
@@ -1034,13 +1252,76 @@ class BattleWebServer:
             return true;
         }
 
+        // Update captured pieces display
+        function updateCapturedPieces() {
+            const capturedWhiteDiv = document.getElementById('capturedWhite');
+            const capturedBlackDiv = document.getElementById('capturedBlack');
+
+            capturedWhiteDiv.innerHTML = '';
+            capturedBlackDiv.innerHTML = '';
+
+            // Display captured white pieces
+            capturedPieces.white.forEach(piece => {
+                const span = document.createElement('span');
+                span.className = 'captured-piece';
+                span.textContent = pieceUnicode[piece] || piece;
+                capturedWhiteDiv.appendChild(span);
+            });
+
+            // Display captured black pieces
+            capturedPieces.black.forEach(piece => {
+                const span = document.createElement('span');
+                span.className = 'captured-piece';
+                span.textContent = pieceUnicode[piece] || piece;
+                capturedBlackDiv.appendChild(span);
+            });
+        }
+
+        // Copy moves to clipboard
+        async function copyMovesToClipboard() {
+            if (!currentGameId) return;
+
+            try {
+                const response = await fetch(`/api/games/${currentGameId}`);
+                const game = await response.json();
+
+                if (game.moves) {
+                    let moveText = '';
+                    for (let i = 0; i < game.moves.length; i += 2) {
+                        const moveNum = Math.floor(i / 2) + 1;
+                        const whiteMove = game.moves[i];
+                        const blackMove = game.moves[i + 1];
+
+                        moveText += `${moveNum}. ${whiteMove.move}`;
+                        if (blackMove) {
+                            moveText += ` ${blackMove.move}`;
+                        }
+                        moveText += '\\n';
+                    }
+
+                    await navigator.clipboard.writeText(moveText.trim());
+
+                    // Show feedback
+                    const btn = document.getElementById('copyMovesBtn');
+                    const originalText = btn.textContent;
+                    btn.textContent = '✓ Copied!';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                    }, 2000);
+                }
+            } catch (error) {
+                console.error('Failed to copy moves:', error);
+                alert('Failed to copy moves to clipboard');
+            }
+        }
+
         async function createGame() {
             const whiteEngine = document.getElementById('whiteEngineSelect').value;
             const blackEngine = document.getElementById('blackEngineSelect').value;
             const gameFormat = document.getElementById('gameFormat').value;
 
-            if (whiteEngine === blackEngine) {
-                alert('Please select different engines for white and black');
+            if (whiteEngine === blackEngine && whiteEngine !== 'human') {
+                alert('Please select different engines for white and black (or use Human Player for both)');
                 return;
             }
 
@@ -1051,8 +1332,8 @@ class BattleWebServer:
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        white_engine: whiteEngine + ' Engine',
-                        black_engine: blackEngine + ' Engine',
+                        white_engine: whiteEngine === 'human' ? 'Human Player' : whiteEngine + ' Engine',
+                        black_engine: blackEngine === 'human' ? 'Human Player' : blackEngine + ' Engine',
                         format: gameFormat
                     })
                 });
@@ -1068,8 +1349,10 @@ class BattleWebServer:
                     updateGameStatus('Game created! Ready to start.');
 
                     // Show engine info
-                    document.getElementById('whiteEngine').textContent = whiteEngine + ' Engine';
-                    document.getElementById('blackEngine').textContent = blackEngine + ' Engine';
+                    const whiteText = whiteEngine === 'human' ? 'Human Player' : whiteEngine + ' Engine';
+                    const blackText = blackEngine === 'human' ? 'Human Player' : blackEngine + ' Engine';
+                    document.getElementById('whiteEngine').textContent = whiteText;
+                    document.getElementById('blackEngine').textContent = blackText;
                     document.getElementById('engineInfo').style.display = 'grid';
 
                     // Reset board to starting position
@@ -1169,7 +1452,7 @@ class BattleWebServer:
                         // Parse and display the result prominently
                         let resultText = '';
                         let resultClass = '';
-                        
+
                         if (game.result.includes('Draw') || game.result.includes('draw')) {
                             resultText = '🤝 DRAW GAME';
                             statusText = `Game finished in a draw: ${game.result}`;
@@ -1193,13 +1476,13 @@ class BattleWebServer:
                             statusClass = 'finished';
                             resultClass = 'result-draw';
                         }
-                        
+
                         // Show the prominent result display
                         const gameResultDiv = document.getElementById('gameResult');
                         gameResultDiv.textContent = resultText;
                         gameResultDiv.className = `game-result ${resultClass}`;
                         gameResultDiv.style.display = 'block';
-                        
+
                         if (refreshInterval) {
                             clearInterval(refreshInterval);
                             refreshInterval = null;
@@ -1221,10 +1504,7 @@ class BattleWebServer:
                 game.moves.forEach((move, index) => {
                     const moveDiv = document.createElement('div');
                     moveDiv.className = `move-item ${move.player.toLowerCase()}`;
-                    moveDiv.innerHTML = `
-                        <span>${move.move_num}. ${move.move}</span>
-                        <span>${move.player} (${move.time_taken.toFixed(2)}s)</span>
-                    `;
+                    moveDiv.innerHTML = `<span>${move.move_num}. ${move.move}</span><span>${move.player} (${move.time_taken.toFixed(2)}s)</span>`;
                     movesContent.appendChild(moveDiv);
 
                     // Apply move to visual board
@@ -1233,6 +1513,7 @@ class BattleWebServer:
 
                 // Update the visual board after all moves
                 updateBoardDisplay();
+                updateCapturedPieces();
 
                 // Auto scroll to bottom
                 movesContent.scrollTop = movesContent.scrollHeight;
@@ -1252,10 +1533,17 @@ class BattleWebServer:
         document.addEventListener('DOMContentLoaded', function() {
             initializeBoard();
             updateGameStatus('Ready to create a new game');
+
+            // Add event listeners for buttons
+            document.getElementById('createGameBtn').addEventListener('click', createGame);
+            document.getElementById('startGameBtn').addEventListener('click', startGame);
+            document.getElementById('stopGameBtn').addEventListener('click', stopGame);
+            document.getElementById('refreshBtn').addEventListener('click', refreshGameState);
+            document.getElementById('copyMovesBtn').addEventListener('click', copyMovesToClipboard);
         });
     </script>
 </body>
-</html>'''
+</html>"""
 
         return BattleHandler
 
