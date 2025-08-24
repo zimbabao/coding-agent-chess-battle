@@ -729,10 +729,11 @@ class BattleWebServer:
         }
         .content {
             display: grid;
-            grid-template-columns: 1fr 350px;
+            grid-template-columns: auto 350px;
             gap: 20px;
             padding: 20px;
             min-height: 600px;
+            justify-content: start;
         }
         .game-area {
             display: flex;
@@ -822,6 +823,7 @@ class BattleWebServer:
             border-radius: 4px;
             padding: 10px;
             background: #fafafa;
+            margin-top: 20px;
         }
         .move-item {
             padding: 5px 10px;
@@ -1064,12 +1066,6 @@ class BattleWebServer:
                         </div>
                     </div>
                 </div>
-
-                <div id="movesList" class="moves-list" style="display: none;">
-                    <h4>Move History</h4>
-                    <div id="movesContent"></div>
-                    <button id="copyMovesBtn" class="copy-btn">📋 Copy Moves</button>
-                </div>
             </div>
 
             <div class="controls">
@@ -1121,6 +1117,12 @@ class BattleWebServer:
                 <button id="startGameBtn" disabled>Start Battle</button>
                 <button id="stopGameBtn" disabled>Stop Game</button>
                 <button id="refreshBtn">Refresh</button>
+
+                <div id="movesList" class="moves-list">
+                    <h4>Move History</h4>
+                    <div id="movesContent">No moves yet</div>
+                    <button id="copyMovesBtn" class="copy-btn">📋 Copy Moves</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1364,6 +1366,9 @@ class BattleWebServer:
 
                     // Reset board to starting position
                     initializeBoard();
+
+                    // Clear moves list
+                    document.getElementById('movesContent').innerHTML = 'No moves yet';
                 }
             } catch (error) {
                 alert('Error creating game: ' + error.message);
@@ -1400,9 +1405,6 @@ class BattleWebServer:
 
                     // Start auto-refresh
                     refreshInterval = setInterval(refreshGameState, 1000);
-
-                    // Show moves list
-                    document.getElementById('movesList').style.display = 'block';
                 }
             } catch (error) {
                 alert('Error starting game: ' + error.message);
