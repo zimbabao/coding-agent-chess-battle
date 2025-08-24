@@ -30,32 +30,32 @@ from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__), 'augment-chess'))
 sys.path.append(os.path.join(os.path.dirname(__file__), 'claude-chess'))
 
-# Import both engines
-try:
-    from augment_chess.chess_engine import ChessEngine as AugmentEngine
-    AUGMENT_AVAILABLE = True
-except ImportError:
-    try:
-        # Try importing from local augment-chess directory
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'augment-chess'))
-        from chess_engine import ChessEngine as AugmentEngine
-        AUGMENT_AVAILABLE = True
-    except ImportError as e:
-        print(f"Warning: Could not import Augment engine: {e}")
-        AUGMENT_AVAILABLE = False
+# Import both engines with proper isolation
+AUGMENT_AVAILABLE = False
+CLAUDE_AVAILABLE = False
 
+# Import Augment engine
 try:
-    from claude_chess.chess_engine import ChessBoard as ClaudeBoard
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'augment-chess'))
+    import chess_engine as augment_chess_engine
+    import utils as augment_utils
+    AugmentEngine = augment_chess_engine.ChessEngine
+    AUGMENT_AVAILABLE = True
+    # Remove augment path to avoid conflicts
+    sys.path = [p for p in sys.path if 'augment-chess' not in p]
+except ImportError as e:
+    print(f"Warning: Could not import Augment engine: {e}")
+
+# Import Claude engine  
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'claude-chess'))
+    import chess_engine as claude_chess_engine
+    ClaudeBoard = claude_chess_engine.ChessBoard
     CLAUDE_AVAILABLE = True
-except ImportError:
-    try:
-        # Try importing from local claude-chess directory
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'claude-chess'))
-        from chess_engine import ChessBoard as ClaudeBoard
-        CLAUDE_AVAILABLE = True
-    except ImportError as e:
-        print(f"Warning: Could not import Claude engine: {e}")
-        CLAUDE_AVAILABLE = False
+    # Remove claude path to avoid conflicts
+    sys.path = [p for p in sys.path if 'claude-chess' not in p]
+except ImportError as e:
+    print(f"Warning: Could not import Claude engine: {e}")
 
 @dataclass
 class GameMove:
@@ -107,7 +107,8 @@ class EngineWrapper:
         
         if self.engine_type == "augment":
             try:
-                move, score = self.engine.get_best_move(depth=depth, time_limit=time_limit)
+                # Augment engine returns just a Move object
+                move = self.engine.get_best_move(depth=depth, time_limit=time_limit)
                 if move:
                     # Convert move object to UCI string
                     move_str = str(move)  # Move class has __str__ method that returns UCI format
@@ -117,50 +118,70 @@ class EngineWrapper:
                 return move_str, elapsed
             except Exception as e:
                 print(f"Augment engine error: {e}")
+                import traceback
+                print(f"Augment engine traceback: {traceback.format_exc()}")
                 return None, time.time() - start_time
                 
         elif self.engine_type == "claude":
             try:
-                move_str, score = self.engine.search(depth)
+                # Claude engine: get moves and pick the first one (simple strategy)
+                moves = self.engine.generate_legal_moves()
+                if moves:
+                    # For now, just take the first legal move
+                    # TODO: Add proper search algorithm integration
+                    move_str = moves[0]
+                else:
+                    move_str = None
                 elapsed = time.time() - start_time
                 return move_str, elapsed
             except Exception as e:
                 print(f"Claude engine error: {e}")
+                import traceback
+                print(f"Claude engine traceback: {traceback.format_exc()}")
                 return None, time.time() - start_time
         
         return None, 0.0
     
     def make_move(self, move_str: str) -> bool:
         """Make a move on the engine's board"""
-        if self.engine_type == "augment":
-            return self.engine.make_move(move_str)
-        elif self.engine_type == "claude":
-            return self.engine.make_move(move_str)
-        return False
+        try:
+            if self.engine_type == "augment":
+                return self.engine.make_move(move_str)
+            elif self.engine_type == "claude":
+                return self.engine.make_move(move_str)
+            return False
+        except Exception as e:
+            print(f"Error making move {move_str} on {self.engine_type}: {e}")
+            return False
     
     def is_game_over(self) -> Tuple[bool, Optional[str]]:
         """Check if the game is over"""
-        if self.engine_type == "augment":
-            return self.engine.is_game_over()
-        elif self.engine_type == "claude":
-            # Implement basic game over detection for Claude engine
-            moves = self.engine.generate_moves()
-            if not moves:
-                if self.engine.is_in_check():
-                    color = "White" if self.engine.white_to_move else "Black"
-                    winner = "Black" if self.engine.white_to_move else "White"
-                    return True, f"{winner} wins by checkmate"
-                else:
-                    return True, "Draw by stalemate"
+        try:
+            if self.engine_type == "augment":
+                return self.engine.is_game_over()
+            elif self.engine_type == "claude":
+                # Implement basic game over detection for Claude engine
+                moves = self.engine.generate_legal_moves()
+                if not moves:
+                    if self.engine.is_in_check():
+                        color = "White" if self.engine.to_move == 'white' else "Black"
+                        winner = "Black" if self.engine.to_move == 'white' else "White"
+                        return True, f"{winner} wins by checkmate"
+                    else:
+                        return True, "Draw by stalemate"
+                return False, None
             return False, None
-        return False, None
+        except Exception as e:
+            print(f"Error checking game over for {self.engine_type}: {e}")
+            return False, None
     
     def get_board_state(self) -> str:
         """Get current board state as string for display"""
         if self.engine_type == "augment":
             return str(self.engine.board)
         elif self.engine_type == "claude":
-            return self.engine.display_board()
+            # Claude board doesn't have display_board, just return a simple representation
+            return f"Claude board state (move: {self.engine.to_move})"
         return ""
     
     def reset(self):
@@ -177,7 +198,7 @@ class EngineWrapper:
 class EngineBattle:
     """Main class managing engine battles"""
     
-    def __init__(self, port: int = 8001):
+    def __init__(self, port: int = 8003):
         self.port = port
         self.games: Dict[str, GameState] = {}
         self.current_game: Optional[GameState] = None
@@ -310,7 +331,9 @@ class EngineBattle:
                 time.sleep(0.5)
                 
         except Exception as e:
+            import traceback
             print(f"Error in game: {e}")
+            print(f"Full traceback: {traceback.format_exc()}")
             game.result = f"Error: {e}"
             game.status = "finished"
             game.end_time = datetime.now().isoformat()
@@ -385,8 +408,12 @@ class BattleWebServer:
                     black_engine = data.get('black_engine', 'Claude Engine') 
                     game_format = data.get('format', 'standard')
                     
+                    # Extract additional kwargs, excluding the ones we already have
+                    additional_kwargs = {k: v for k, v in data.items() 
+                                       if k not in ['white_engine', 'black_engine', 'format']}
+                    
                     try:
-                        game_id = battle.create_game(white_engine, black_engine, game_format, **data)
+                        game_id = battle.create_game(white_engine, black_engine, game_format, **additional_kwargs)
                         self.send_json_response({'game_id': game_id, 'status': 'created'})
                     except Exception as e:
                         self.send_json_response({'error': str(e)}, status=400)
@@ -924,7 +951,7 @@ def main():
         return
     
     # Initialize battle system
-    battle = EngineBattle(port=8001)
+    battle = EngineBattle(port=8003)
     web_server = BattleWebServer(battle)
     
     # Start web server
