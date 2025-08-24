@@ -571,6 +571,7 @@ class EngineBattle:
                 game.moves.append(game_move)
 
                 print(f"Move {move_num}: {player} plays {move_notation} (took {time_taken:.2f}s)")
+                print(f"DEBUG: Stored move in game: {move_notation}", flush=True)
 
                 # Switch to other player
                 current_engine = other_engine
@@ -1341,7 +1342,7 @@ class BattleWebServer:
                 const response = await fetch(`/api/games/${currentGameId}`);
                 const game = await response.json();
 
-                if (game.moves) {
+                if (game.moves && game.moves.length > 0) {
                     let moveText = '';
                     for (let i = 0; i < game.moves.length; i += 2) {
                         const moveNum = Math.floor(i / 2) + 1;
@@ -1355,6 +1356,7 @@ class BattleWebServer:
                         moveText += '\\n';
                     }
 
+                    console.log('Copying moves:', moveText); // Debug log
                     await navigator.clipboard.writeText(moveText.trim());
 
                     // Show feedback
@@ -1364,6 +1366,8 @@ class BattleWebServer:
                     setTimeout(() => {
                         btn.textContent = originalText;
                     }, 2000);
+                } else {
+                    alert('No moves to copy');
                 }
             } catch (error) {
                 console.error('Failed to copy moves:', error);
