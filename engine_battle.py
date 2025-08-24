@@ -854,10 +854,24 @@ class BattleWebServer:
             box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }
         .game-info {
-            background: #e3f2fd;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 10px;
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .game-info h3 {
+            margin: 0 0 10px 0;
+            color: #1565c0;
+            font-size: 18px;
+        }
+        .game-info p {
+            margin: 0;
+            color: #424242;
+            font-size: 14px;
         }
         .moves-list {
             max-height: 300px;
@@ -981,29 +995,47 @@ class BattleWebServer:
         .engine-info {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 10px;
+            gap: 20px;
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 600px;
         }
         .engine-card {
-            padding: 15px;
-            border-radius: 8px;
+            padding: 20px;
+            border-radius: 12px;
             text-align: center;
+            min-height: 80px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
         .engine-white {
-            background: #f8f9fa;
-            border: 2px solid #fff;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 2px solid #dee2e6;
+            color: #212529;
         }
         .engine-black {
-            background: #343a40;
+            background: linear-gradient(135deg, #343a40 0%, #212529 100%);
             color: white;
-            border: 2px solid #000;
+            border: 2px solid #495057;
+        }
+        .engine-card h4 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .engine-card p {
+            margin: 0 0 10px 0;
+            font-size: 14px;
         }
         .engine-status {
-            font-size: 12px;
-            margin-top: 5px;
-            padding: 4px 8px;
-            border-radius: 4px;
+            font-size: 13px;
+            margin-top: 8px;
+            padding: 8px 16px;
+            border-radius: 20px;
             font-weight: bold;
+            transition: all 0.3s ease;
         }
         .engine-white .engine-status {
             background: #e3f2fd;
