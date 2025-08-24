@@ -419,7 +419,7 @@ class EngineBattle:
                                 print(f"Sample legal moves: {[str(m) for m in moves[:5]]}", flush=True)
                             else:
                                 print("Augment engine sees NO legal moves - may be checkmate/stalemate or invalid state", flush=True)
-                                
+
                         # Check if this is actually game over vs. engine error
                         game_over, result = current_engine.is_game_over()
                         if game_over:
@@ -428,7 +428,7 @@ class EngineBattle:
                         else:
                             print("Game should not be over - this is an engine synchronization error", flush=True)
                             game.result = f"Engine synchronization error: {current_engine.engine_name} could not generate a move (engines out of sync)"
-                            
+
                     except Exception as e:
                         print(f"Could not get moves for debugging: {e}", flush=True)
                         game.result = f"Engine error: {current_engine.engine_name} could not generate a move"
@@ -529,20 +529,51 @@ class EngineBattle:
                     game.status = "finished"
                     break
 
-                # Record move
+                # Switch players first to check if opponent is in checkmate/check
+                other_engine = black_engine if current_engine == white_engine else white_engine
+
+                # Check if this move puts opponent in checkmate or check
+                move_notation = move_str
+                try:
+                    game_over, result = other_engine.is_game_over()
+                    if game_over and result and "checkmate" in result.lower():
+                        move_notation = move_str + "#"  # Checkmate symbol
+                    else:
+                        # Check if opponent is in check (not checkmate)
+                        if other_engine.engine_type == "augment" and hasattr(other_engine.engine, 'board'):
+                            if hasattr(other_engine.engine.board, 'is_check') and other_engine.engine.board.is_check():
+                                move_notation = move_str + "+"  # Check symbol
+                        elif other_engine.engine_type == "claude":
+                            # For Claude engine, try to determine if in check
+                            try:
+                                import importlib.util
+                                claude_path = os.path.join(os.path.dirname(__file__), 'claude-chess', 'chess_engine.py')
+                                spec = importlib.util.spec_from_file_location("claude_engine_module", claude_path)
+                                claude_module = importlib.util.module_from_spec(spec)
+                                spec.loader.exec_module(claude_module)
+                                temp_engine = claude_module.ChessEngine()
+                                temp_engine.board = other_engine.engine
+                                if temp_engine.is_in_check(other_engine.engine):
+                                    move_notation = move_str + "+"  # Check symbol
+                            except:
+                                pass  # If check detection fails, just use basic notation
+                except:
+                    pass  # If check detection fails, just use basic notation
+
+                # Record move with notation
                 player = "White" if current_engine == white_engine else "Black"
                 game_move = GameMove(
                     move_num=move_num,
                     player=player,
-                    move=move_str,
+                    move=move_notation,
                     time_taken=time_taken
                 )
                 game.moves.append(game_move)
 
-                print(f"Move {move_num}: {player} plays {move_str} (took {time_taken:.2f}s)")
+                print(f"Move {move_num}: {player} plays {move_notation} (took {time_taken:.2f}s)")
 
-                # Switch players
-                current_engine = black_engine if current_engine == white_engine else white_engine
+                # Switch to other player
+                current_engine = other_engine
                 if player == "Black":
                     move_num += 1
 
@@ -845,6 +876,14 @@ class BattleWebServer:
         }
         .move-item.black {
             background: #f5f5f5;
+        }
+        .move-checkmate {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .move-check {
+            color: #fd7e14;
+            font-weight: bold;
         }
         button {
             background: #007bff;
@@ -1220,13 +1259,16 @@ class BattleWebServer:
 
         // Apply a move to the current board position
         function applyMove(moveStr) {
-            if (moveStr.length < 4) return false;
+            // Strip check (+) and checkmate (#) symbols for move parsing
+            let cleanMove = moveStr.replace(/[+#]$/, '');
+
+            if (cleanMove.length < 4) return false;
 
             // Parse move (e.g., "e2e4")
-            const fromFile = moveStr.charAt(0).charCodeAt(0) - 'a'.charCodeAt(0);
-            const fromRank = 8 - parseInt(moveStr.charAt(1));
-            const toFile = moveStr.charAt(2).charCodeAt(0) - 'a'.charCodeAt(0);
-            const toRank = 8 - parseInt(moveStr.charAt(3));
+            const fromFile = cleanMove.charAt(0).charCodeAt(0) - 'a'.charCodeAt(0);
+            const fromRank = 8 - parseInt(cleanMove.charAt(1));
+            const toFile = cleanMove.charAt(2).charCodeAt(0) - 'a'.charCodeAt(0);
+            const toRank = 8 - parseInt(cleanMove.charAt(3));
 
             // Validate coordinates
             if (fromFile < 0 || fromFile > 7 || fromRank < 0 || fromRank > 7 ||
@@ -1256,8 +1298,8 @@ class BattleWebServer:
             currentBoardPosition[fromRank][fromFile] = '.';
 
             // Handle promotion (simple - just promote to queen)
-            if (moveStr.length === 5) {
-                const promotion = moveStr.charAt(4).toLowerCase();
+            if (cleanMove.length === 5) {
+                const promotion = cleanMove.charAt(4).toLowerCase();
                 if (promotion === 'q') {
                     currentBoardPosition[toRank][toFile] = piece.toLowerCase() === piece ? 'q' : 'Q';
                 }
@@ -1517,7 +1559,16 @@ class BattleWebServer:
 
                 game.moves.forEach((move, index) => {
                     const moveDiv = document.createElement('div');
-                    moveDiv.className = `move-item ${move.player.toLowerCase()}`;
+                    let className = `move-item ${move.player.toLowerCase()}`;
+
+                    // Add special styling for checkmate and check moves
+                    if (move.move.endsWith('#')) {
+                        className += ' move-checkmate';
+                    } else if (move.move.endsWith('+')) {
+                        className += ' move-check';
+                    }
+
+                    moveDiv.className = className;
                     moveDiv.innerHTML = `<span>${move.move_num}. ${move.move}</span><span>${move.player} (${move.time_taken.toFixed(2)}s)</span>`;
                     movesContent.appendChild(moveDiv);
 
