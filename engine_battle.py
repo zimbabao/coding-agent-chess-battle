@@ -477,11 +477,14 @@ class EngineBattle:
                     # Try various promotion format alternatives
                     alternatives_to_try = []
 
-                    # Try opposite case
-                    if promotion_piece.isupper():
-                        alternatives_to_try.append(base_move + promotion_piece.lower())
+                    # Get original promotion character from move_str
+                    original_promotion_char = move_str[4] if len(move_str) == 5 else promotion_piece
+
+                    # Try opposite case first (most likely to work)
+                    if original_promotion_char.isupper():
+                        alternatives_to_try.append(base_move + original_promotion_char.lower())
                     else:
-                        alternatives_to_try.append(base_move + promotion_piece.upper())
+                        alternatives_to_try.append(base_move + original_promotion_char.upper())
 
                     # Try without promotion piece suffix
                     alternatives_to_try.append(base_move)
@@ -491,11 +494,13 @@ class EngineBattle:
                     alternatives_to_try.append(base_move + '=' + promotion_piece.lower())
 
                     for alternative in alternatives_to_try:
-                        if alternative != move_str:  # Don't retry the same move
-                            other_success = other_engine.make_move(alternative)
-                            if other_success:
-                                print(f"Move accepted with alternative format: {alternative}", flush=True)
-                                break
+                        print(f"Trying alternative format: {alternative}", flush=True)
+                        other_success = other_engine.make_move(alternative)
+                        if other_success:
+                            print(f"Move accepted with alternative format: {alternative}", flush=True)
+                            break
+                        else:
+                            print(f"Alternative {alternative} also rejected", flush=True)
 
                 if not other_success:
                     print(f"=== CRITICAL ENGINE SYNCHRONIZATION ERROR ===", flush=True)
