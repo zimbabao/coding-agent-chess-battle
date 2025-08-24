@@ -947,13 +947,25 @@ class BattleWebServer:
             'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟'
         };
 
+        // Current board state
+        let currentBoardPosition = [
+            ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
+            ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+            ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
+        ];
+
         // Initialize chess board display
         function initializeBoard() {
             const board = document.getElementById('chessBoard');
             board.innerHTML = '';
 
-            // Standard starting position
-            const startingPos = [
+            // Reset to starting position
+            currentBoardPosition = [
                 ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
                 ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
                 ['.', '.', '.', '.', '.', '.', '.', '.'],
@@ -964,12 +976,20 @@ class BattleWebServer:
                 ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
             ];
 
+            updateBoardDisplay();
+        }
+
+        // Update the visual board display
+        function updateBoardDisplay() {
+            const board = document.getElementById('chessBoard');
+            board.innerHTML = '';
+
             for (let rank = 0; rank < 8; rank++) {
                 for (let file = 0; file < 8; file++) {
                     const square = document.createElement('div');
                     square.className = `square ${(rank + file) % 2 === 0 ? 'light' : 'dark'}`;
 
-                    const piece = startingPos[rank][file];
+                    const piece = currentBoardPosition[rank][file];
                     if (piece !== '.') {
                         square.textContent = pieceUnicode[piece] || piece;
                     }
@@ -977,6 +997,41 @@ class BattleWebServer:
                     board.appendChild(square);
                 }
             }
+        }
+
+        // Apply a move to the current board position
+        function applyMove(moveStr) {
+            if (moveStr.length < 4) return false;
+
+            // Parse move (e.g., "e2e4")
+            const fromFile = moveStr.charAt(0).charCodeAt(0) - 'a'.charCodeAt(0);
+            const fromRank = 8 - parseInt(moveStr.charAt(1));
+            const toFile = moveStr.charAt(2).charCodeAt(0) - 'a'.charCodeAt(0);
+            const toRank = 8 - parseInt(moveStr.charAt(3));
+
+            // Validate coordinates
+            if (fromFile < 0 || fromFile > 7 || fromRank < 0 || fromRank > 7 ||
+                toFile < 0 || toFile > 7 || toRank < 0 || toRank > 7) {
+                return false;
+            }
+
+            // Get the piece to move
+            const piece = currentBoardPosition[fromRank][fromFile];
+            if (piece === '.') return false;
+
+            // Make the move
+            currentBoardPosition[toRank][toFile] = piece;
+            currentBoardPosition[fromRank][fromFile] = '.';
+
+            // Handle promotion (simple - just promote to queen)
+            if (moveStr.length === 5) {
+                const promotion = moveStr.charAt(4).toLowerCase();
+                if (promotion === 'q') {
+                    currentBoardPosition[toRank][toFile] = piece.toLowerCase() === piece ? 'q' : 'Q';
+                }
+            }
+
+            return true;
         }
 
         async function createGame() {
@@ -1016,12 +1071,9 @@ class BattleWebServer:
                     document.getElementById('whiteEngine').textContent = whiteEngine + ' Engine';
                     document.getElementById('blackEngine').textContent = blackEngine + ' Engine';
                     document.getElementById('engineInfo').style.display = 'grid';
-                    
-                    // Update status indicators
-                    document.getElementById('whiteStatus').textContent = 'Ready';
-                    document.getElementById('blackStatus').textContent = 'Ready';
-                    document.getElementById('whiteStatus').className = 'engine-status';
-                    document.getElementById('blackStatus').className = 'engine-status';
+
+                    // Reset board to starting position
+                    initializeBoard();
                 }
             } catch (error) {
                 alert('Error creating game: ' + error.message);
@@ -1055,18 +1107,6 @@ class BattleWebServer:
                     document.getElementById('startGameBtn').disabled = true;
                     document.getElementById('stopGameBtn').disabled = false;
                     updateGameStatus('Battle in progress!');
-                    
-                    // Hide any previous game result
-                    document.getElementById('gameResult').style.display = 'none';
-                    
-                    // Update game info to show the battle
-                    const whiteEngine = document.getElementById('whiteEngine').textContent;
-                    const blackEngine = document.getElementById('blackEngine').textContent;
-                    document.getElementById('gameInfo').innerHTML = `
-                        <h3>⚔️ Engine Battle in Progress</h3>
-                        <p><strong>⚪ White:</strong> ${whiteEngine} vs <strong>⚫ Black:</strong> ${blackEngine}</p>
-                        <p>Watch the battle unfold move by move!</p>
-                    `;
 
                     // Start auto-refresh
                     refreshInterval = setInterval(refreshGameState, 1000);
@@ -1171,9 +1211,12 @@ class BattleWebServer:
 
                 updateGameStatus(statusText, statusClass);
 
-                // Update moves list
+                // Update moves list and board position
                 const movesContent = document.getElementById('movesContent');
                 movesContent.innerHTML = '';
+
+                // Reset board to starting position and replay all moves
+                initializeBoard();
 
                 game.moves.forEach((move, index) => {
                     const moveDiv = document.createElement('div');
@@ -1183,33 +1226,16 @@ class BattleWebServer:
                         <span>${move.player} (${move.time_taken.toFixed(2)}s)</span>
                     `;
                     movesContent.appendChild(moveDiv);
+
+                    // Apply move to visual board
+                    applyMove(move.move);
                 });
+
+                // Update the visual board after all moves
+                updateBoardDisplay();
 
                 // Auto scroll to bottom
                 movesContent.scrollTop = movesContent.scrollHeight;
-
-                // Update engine status indicators
-                if (game.status === 'playing') {
-                    // Determine whose turn it is based on move count
-                    const isWhiteTurn = game.moves.length % 2 === 0;
-                    
-                    if (isWhiteTurn) {
-                        document.getElementById('whiteStatus').textContent = 'Thinking...';
-                        document.getElementById('whiteStatus').className = 'engine-status thinking';
-                        document.getElementById('blackStatus').textContent = 'Waiting';
-                        document.getElementById('blackStatus').className = 'engine-status';
-                    } else {
-                        document.getElementById('blackStatus').textContent = 'Thinking...';
-                        document.getElementById('blackStatus').className = 'engine-status thinking';
-                        document.getElementById('whiteStatus').textContent = 'Waiting';
-                        document.getElementById('whiteStatus').className = 'engine-status';
-                    }
-                } else if (game.status === 'finished') {
-                    document.getElementById('whiteStatus').textContent = 'Game Over';
-                    document.getElementById('whiteStatus').className = 'engine-status';
-                    document.getElementById('blackStatus').textContent = 'Game Over';
-                    document.getElementById('blackStatus').className = 'engine-status';
-                }
 
             } catch (error) {
                 console.error('Error refreshing game state:', error);
