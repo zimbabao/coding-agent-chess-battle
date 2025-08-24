@@ -1,0 +1,10 @@
+# PyChess Engine Requirements
+# This engine uses only Python standard library - no external dependencies required
+
+# For development and testing (optional):
+# pytest>=6.0.0
+# black>=21.0.0
+# flake8>=3.8.0
+
+# Note: This chess engine is designed to work with Python 3.6+ 
+# and uses only built-in modules for maximum compatibility
