@@ -234,7 +234,19 @@ class EngineWrapper:
         """Check if the game is over"""
         try:
             if self.engine_type == "augment":
-                return self.engine.is_game_over()
+                is_over, result = self.engine.is_game_over()
+                if is_over and result:
+                    # Improve the result message to clearly show who won
+                    if "checkmate" in result.lower():
+                        # The player who just moved delivered checkmate, so they won
+                        # white_to_move is False when it's white's turn (after black moved)
+                        winner = "Black" if self.engine.board.white_to_move else "White"
+                        return True, f"{winner} wins by checkmate"
+                    elif "stalemate" in result.lower():
+                        return True, "Draw by stalemate"
+                    else:
+                        return True, result
+                return is_over, result
             elif self.engine_type == "claude":
                 # Use Claude engine's built-in game over detection
                 moves = self.engine.generate_moves()
@@ -387,49 +399,46 @@ class EngineBattle:
                 move_str, time_taken = current_engine.get_best_move(depth, move_time)
 
                 if not move_str:
-                    print(f"ENGINE ERROR: {current_engine.engine_name} returned no move")
+                    print(f"=== ENGINE MOVE GENERATION ERROR ===", flush=True)
+                    print(f"ENGINE ERROR: {current_engine.engine_name} returned no move", flush=True)
+                    print(f"This likely indicates the engines are out of sync", flush=True)
 
                     # Try to get available moves for debugging
                     try:
                         if current_engine.engine_type == "claude":
                             moves = current_engine.engine.generate_moves()
-                            print(f"Claude engine has {len(moves) if moves else 0} available moves")
+                            print(f"Claude engine reports {len(moves) if moves else 0} available moves", flush=True)
                             if moves:
-                                print(f"Sample moves: {moves[:5]}")
+                                print(f"Sample legal moves: {moves[:5]}", flush=True)
+                            else:
+                                print("Claude engine sees NO legal moves - may be checkmate/stalemate or invalid state", flush=True)
                         elif current_engine.engine_type == "augment":
                             moves = current_engine.engine.get_legal_moves()
-                            print(f"Augment engine has {len(moves) if moves else 0} available moves")
+                            print(f"Augment engine reports {len(moves) if moves else 0} available moves", flush=True)
                             if moves:
-                                print(f"Sample moves: {[str(m) for m in moves[:5]]}")
-                    except Exception as e:
-                        print(f"Could not get moves for debugging: {e}")
+                                print(f"Sample legal moves: {[str(m) for m in moves[:5]]}", flush=True)
+                            else:
+                                print("Augment engine sees NO legal moves - may be checkmate/stalemate or invalid state", flush=True)
 
-                    game.result = f"Engine error: {current_engine.engine_name} could not generate a move"
+                        # Check if this is actually game over vs. engine error
+                        game_over, result = current_engine.is_game_over()
+                        if game_over:
+                            print(f"Game is actually over: {result}", flush=True)
+                            game.result = result
+                        else:
+                            print("Game should not be over - this is an engine synchronization error", flush=True)
+                            game.result = f"Engine synchronization error: {current_engine.engine_name} could not generate a move (engines out of sync)"
+
+                    except Exception as e:
+                        print(f"Could not get moves for debugging: {e}", flush=True)
+                        game.result = f"Engine error: {current_engine.engine_name} could not generate a move"
+
                     game.status = "finished"
                     break
 
-                # Validate the move looks reasonable
-                print(f"=== ENGINE MOVE DEBUG ===", flush=True)
-                print(f"Engine {current_engine.engine_name} suggests: {move_str}", flush=True)
-                if len(move_str) >= 4:
-                    from_sq = move_str[:2]
-                    to_sq = move_str[2:4]
-                    print(f"  Move details: {from_sq} -> {to_sq}", flush=True)
-                    if len(move_str) == 5:
-                        print(f"  Promotion to: {move_str[4]}", flush=True)
-
-                    # Check if this looks like a reasonable pawn promotion
-                    if len(move_str) == 5 and move_str[4].upper() in 'QRBN':
-                        from_rank = int(move_str[1])
-                        to_rank = int(move_str[3])
-                        if current_engine == white_engine:
-                            # White pawn promotion should be from 7th rank to 8th rank
-                            if from_rank != 7 or to_rank != 8:
-                                print(f"  WARNING: Suspicious white promotion move: {move_str}", flush=True)
-                        else:
-                            # Black pawn promotion should be from 2nd rank to 1st rank
-                            if from_rank != 2 or to_rank != 1:
-                                print(f"  WARNING: Suspicious black promotion move: {move_str}", flush=True)
+                # Validate the move looks reasonable (reduced debug output)
+                if len(move_str) == 5 and move_str[4].upper() in 'QRBN':
+                    print(f"Promotion move: {move_str}", flush=True)
 
                 # Clean up the move string to handle promotion properly
                 clean_move = move_str
@@ -437,15 +446,12 @@ class EngineBattle:
                     # This is a promotion move - some engines might not expect the promotion piece
                     base_move = move_str[:4]
                     promotion_piece = move_str[4].upper()
-                    print(f"Promotion move detected: {base_move} promotes to {promotion_piece}", flush=True)
                 else:
                     base_move = move_str
                     promotion_piece = None
 
                 # Make move on both engines
-                print(f"Making move {move_str} on {current_engine.engine_name}", flush=True)
                 current_success = current_engine.make_move(move_str)
-                print(f"Move result for {current_engine.engine_name}: {current_success}", flush=True)
                 if not current_success:
                     print(f"INVALID MOVE DETECTED:", flush=True)
                     print(f"  Engine: {current_engine.engine_name}", flush=True)
@@ -465,19 +471,20 @@ class EngineBattle:
                 other_engine = black_engine if current_engine == white_engine else white_engine
 
                 # Try the move with the other engine, with fallback for promotion format differences
-                print(f"Validating move {move_str} with {other_engine.engine_name}", flush=True)
                 other_success = other_engine.make_move(move_str)
-                print(f"Validation result from {other_engine.engine_name}: {other_success}", flush=True)
 
                 if not other_success and promotion_piece:
                     # Try various promotion format alternatives
                     alternatives_to_try = []
 
-                    # Try opposite case
-                    if promotion_piece.isupper():
-                        alternatives_to_try.append(base_move + promotion_piece.lower())
+                    # Get original promotion character from move_str
+                    original_promotion_char = move_str[4] if len(move_str) == 5 else promotion_piece
+
+                    # Try opposite case first (most likely to work)
+                    if original_promotion_char.isupper():
+                        alternatives_to_try.append(base_move + original_promotion_char.lower())
                     else:
-                        alternatives_to_try.append(base_move + promotion_piece.upper())
+                        alternatives_to_try.append(base_move + original_promotion_char.upper())
 
                     # Try without promotion piece suffix
                     alternatives_to_try.append(base_move)
@@ -487,12 +494,13 @@ class EngineBattle:
                     alternatives_to_try.append(base_move + '=' + promotion_piece.lower())
 
                     for alternative in alternatives_to_try:
-                        if alternative != move_str:  # Don't retry the same move
-                            print(f"Retrying with alternative format: {alternative}", flush=True)
-                            other_success = other_engine.make_move(alternative)
-                            print(f"Alternative result from {other_engine.engine_name}: {other_success}", flush=True)
-                            if other_success:
-                                break
+                        print(f"Trying alternative format: {alternative}", flush=True)
+                        other_success = other_engine.make_move(alternative)
+                        if other_success:
+                            print(f"Move accepted with alternative format: {alternative}", flush=True)
+                            break
+                        else:
+                            print(f"Alternative {alternative} also rejected", flush=True)
 
                 if not other_success:
                     print(f"=== CRITICAL ENGINE SYNCHRONIZATION ERROR ===", flush=True)
@@ -515,27 +523,58 @@ class EngineBattle:
                     except Exception as e:
                         print(f"Could not get legal moves from other engine: {e}")
 
-                    # The issue might be that the move is actually illegal
-                    # Let's continue the game instead of stopping it for now
-                    print(f"WARNING: Continuing game despite move rejection (engines may be out of sync)")
-                    # game.result = f"Engine synchronization error: {other_engine.engine_name} rejected {move_str}"
-                    # game.status = "finished"
-                    # break
+                    # Stop the game due to synchronization error - engines are out of sync
+                    print(f"STOPPING GAME: Engines are out of sync and cannot continue reliably")
+                    game.result = f"Engine synchronization error: {other_engine.engine_name} rejected {move_str} - engines have divergent board states"
+                    game.status = "finished"
+                    break
 
-                # Record move
+                # Switch players first to check if opponent is in checkmate/check
+                other_engine = black_engine if current_engine == white_engine else white_engine
+
+                # Check if this move puts opponent in checkmate or check
+                move_notation = move_str
+                try:
+                    game_over, result = other_engine.is_game_over()
+                    if game_over and result and "checkmate" in result.lower():
+                        move_notation = move_str + "#"  # Checkmate symbol
+                    else:
+                        # Check if opponent is in check (not checkmate)
+                        if other_engine.engine_type == "augment" and hasattr(other_engine.engine, 'board'):
+                            if hasattr(other_engine.engine.board, 'is_check') and other_engine.engine.board.is_check():
+                                move_notation = move_str + "+"  # Check symbol
+                        elif other_engine.engine_type == "claude":
+                            # For Claude engine, try to determine if in check
+                            try:
+                                import importlib.util
+                                claude_path = os.path.join(os.path.dirname(__file__), 'claude-chess', 'chess_engine.py')
+                                spec = importlib.util.spec_from_file_location("claude_engine_module", claude_path)
+                                claude_module = importlib.util.module_from_spec(spec)
+                                spec.loader.exec_module(claude_module)
+                                temp_engine = claude_module.ChessEngine()
+                                temp_engine.board = other_engine.engine
+                                if temp_engine.is_in_check(other_engine.engine):
+                                    move_notation = move_str + "+"  # Check symbol
+                            except:
+                                pass  # If check detection fails, just use basic notation
+                except:
+                    pass  # If check detection fails, just use basic notation
+
+                # Record move with notation
                 player = "White" if current_engine == white_engine else "Black"
                 game_move = GameMove(
                     move_num=move_num,
                     player=player,
-                    move=move_str,
+                    move=move_notation,
                     time_taken=time_taken
                 )
                 game.moves.append(game_move)
 
-                print(f"Move {move_num}: {player} plays {move_str} (took {time_taken:.2f}s)")
+                print(f"Move {move_num}: {player} plays {move_notation} (took {time_taken:.2f}s)")
+                print(f"DEBUG: Stored move in game: {move_notation}", flush=True)
 
-                # Switch players
-                current_engine = black_engine if current_engine == white_engine else white_engine
+                # Switch to other player
+                current_engine = other_engine
                 if player == "Black":
                     move_num += 1
 
@@ -728,26 +767,34 @@ class BattleWebServer:
         .content {
             display: grid;
             grid-template-columns: 1fr 400px;
-            gap: 20px;
+            gap: 30px;
             padding: 20px;
             min-height: 600px;
+            max-width: 1400px;
+            margin: 0 auto;
         }
         .game-area {
-            background: #f8f9fa;
-            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
             padding: 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            width: 100%;
         }
         .controls {
             background: #fff;
             border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 20px;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            height: fit-content;
         }
         .board-container {
             display: flex;
             flex-direction: column;
             align-items: center;
-            margin: 20px auto;
+            margin: 0;
             width: fit-content;
         }
         .board-with-labels {
@@ -760,11 +807,12 @@ class BattleWebServer:
         }
         .chess-board {
             display: grid;
-            grid-template-columns: repeat(8, 50px);
-            grid-template-rows: repeat(8, 50px);
+            grid-template-columns: repeat(8, 60px);
+            grid-template-rows: repeat(8, 60px);
             gap: 0px;
-            border: 2px solid #8B4513;
-            margin: 20px auto;
+            border: 3px solid #8B4513;
+            margin: 20px 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
         .rank-label {
             grid-column: 1;
@@ -785,12 +833,12 @@ class BattleWebServer:
             font-size: 14px;
         }
         .square {
-            width: 50px;
-            height: 50px;
+            width: 60px;
+            height: 60px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 32px;
+            font-size: 38px;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.2s;
@@ -806,10 +854,24 @@ class BattleWebServer:
             box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }
         .game-info {
-            background: #e3f2fd;
-            padding: 15px;
-            border-radius: 8px;
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+            padding: 20px;
+            border-radius: 12px;
             margin-bottom: 20px;
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .game-info h3 {
+            margin: 0 0 10px 0;
+            color: #1565c0;
+            font-size: 18px;
+        }
+        .game-info p {
+            margin: 0;
+            color: #424242;
+            font-size: 14px;
         }
         .moves-list {
             max-height: 300px;
@@ -818,6 +880,7 @@ class BattleWebServer:
             border-radius: 4px;
             padding: 10px;
             background: #fafafa;
+            margin-top: 20px;
         }
         .move-item {
             padding: 5px 10px;
@@ -834,6 +897,14 @@ class BattleWebServer:
         }
         .move-item.black {
             background: #f5f5f5;
+        }
+        .move-checkmate {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .move-check {
+            color: #fd7e14;
+            font-weight: bold;
         }
         button {
             background: #007bff;
@@ -924,29 +995,47 @@ class BattleWebServer:
         .engine-info {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 10px;
+            gap: 20px;
             margin-bottom: 20px;
+            width: 100%;
+            max-width: 600px;
         }
         .engine-card {
-            padding: 15px;
-            border-radius: 8px;
+            padding: 20px;
+            border-radius: 12px;
             text-align: center;
+            min-height: 80px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
         .engine-white {
-            background: #f8f9fa;
-            border: 2px solid #fff;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 2px solid #dee2e6;
+            color: #212529;
         }
         .engine-black {
-            background: #343a40;
+            background: linear-gradient(135deg, #343a40 0%, #212529 100%);
             color: white;
-            border: 2px solid #000;
+            border: 2px solid #495057;
+        }
+        .engine-card h4 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .engine-card p {
+            margin: 0 0 10px 0;
+            font-size: 14px;
         }
         .engine-status {
-            font-size: 12px;
-            margin-top: 5px;
-            padding: 4px 8px;
-            border-radius: 4px;
+            font-size: 13px;
+            margin-top: 8px;
+            padding: 8px 16px;
+            border-radius: 20px;
             font-weight: bold;
+            transition: all 0.3s ease;
         }
         .engine-white .engine-status {
             background: #e3f2fd;
@@ -967,36 +1056,85 @@ class BattleWebServer:
             100% { opacity: 1; }
         }
         .captured-pieces {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            width: 100%;
+            max-width: 600px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .captured-pieces h4 {
+            margin: 0 0 15px 0;
+            text-align: center;
+            color: #495057;
+            font-size: 16px;
+            font-weight: bold;
         }
         .captured-container {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 15px;
+            gap: 20px;
+            align-items: stretch;
         }
         .captured-white, .captured-black {
-            padding: 10px;
-            border-radius: 4px;
-            background: white;
-            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 80px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        .captured-white {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            border: 2px solid #dee2e6;
+        }
+        .captured-white:hover {
+            border-color: #adb5bd;
+        }
+        .captured-black {
+            background: linear-gradient(135deg, #f1f3f4 0%, #e9ecef 100%);
+            border: 2px solid #adb5bd;
+        }
+        .captured-black:hover {
+            border-color: #6c757d;
         }
         .captured-label {
             font-weight: bold;
-            font-size: 12px;
+            font-size: 14px;
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 10px;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .captured-list {
             display: flex;
             flex-wrap: wrap;
-            gap: 2px;
+            gap: 8px;
+            justify-content: center;
+            align-items: center;
+            min-height: 40px;
+            flex: 1;
         }
         .captured-piece {
-            font-size: 18px;
+            font-size: 24px;
             display: inline-block;
+            padding: 4px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            transition: transform 0.2s ease;
+        }
+        .captured-piece:hover {
+            transform: scale(1.2);
+        }
+        .captured-list:empty::after {
+            content: "None taken";
+            color: #adb5bd;
+            font-style: italic;
+            font-size: 12px;
         }
         .copy-btn {
             background: #28a745;
@@ -1057,12 +1195,6 @@ class BattleWebServer:
                         </div>
                     </div>
                 </div>
-
-                <div id="movesList" class="moves-list" style="display: none;">
-                    <h4>Move History</h4>
-                    <div id="movesContent"></div>
-                    <button id="copyMovesBtn" class="copy-btn">📋 Copy Moves</button>
-                </div>
             </div>
 
             <div class="controls">
@@ -1114,6 +1246,12 @@ class BattleWebServer:
                 <button id="startGameBtn" disabled>Start Battle</button>
                 <button id="stopGameBtn" disabled>Stop Game</button>
                 <button id="refreshBtn">Refresh</button>
+
+                <div id="movesList" class="moves-list">
+                    <h4>Move History</h4>
+                    <div id="movesContent">No moves yet</div>
+                    <button id="copyMovesBtn" class="copy-btn">📋 Copy Moves</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1206,13 +1344,16 @@ class BattleWebServer:
 
         // Apply a move to the current board position
         function applyMove(moveStr) {
-            if (moveStr.length < 4) return false;
+            // Strip check (+) and checkmate (#) symbols for move parsing
+            let cleanMove = moveStr.replace(/[+#]$/, '');
+
+            if (cleanMove.length < 4) return false;
 
             // Parse move (e.g., "e2e4")
-            const fromFile = moveStr.charAt(0).charCodeAt(0) - 'a'.charCodeAt(0);
-            const fromRank = 8 - parseInt(moveStr.charAt(1));
-            const toFile = moveStr.charAt(2).charCodeAt(0) - 'a'.charCodeAt(0);
-            const toRank = 8 - parseInt(moveStr.charAt(3));
+            const fromFile = cleanMove.charAt(0).charCodeAt(0) - 'a'.charCodeAt(0);
+            const fromRank = 8 - parseInt(cleanMove.charAt(1));
+            const toFile = cleanMove.charAt(2).charCodeAt(0) - 'a'.charCodeAt(0);
+            const toRank = 8 - parseInt(cleanMove.charAt(3));
 
             // Validate coordinates
             if (fromFile < 0 || fromFile > 7 || fromRank < 0 || fromRank > 7 ||
@@ -1242,8 +1383,8 @@ class BattleWebServer:
             currentBoardPosition[fromRank][fromFile] = '.';
 
             // Handle promotion (simple - just promote to queen)
-            if (moveStr.length === 5) {
-                const promotion = moveStr.charAt(4).toLowerCase();
+            if (cleanMove.length === 5) {
+                const promotion = cleanMove.charAt(4).toLowerCase();
                 if (promotion === 'q') {
                     currentBoardPosition[toRank][toFile] = piece.toLowerCase() === piece ? 'q' : 'Q';
                 }
@@ -1285,7 +1426,7 @@ class BattleWebServer:
                 const response = await fetch(`/api/games/${currentGameId}`);
                 const game = await response.json();
 
-                if (game.moves) {
+                if (game.moves && game.moves.length > 0) {
                     let moveText = '';
                     for (let i = 0; i < game.moves.length; i += 2) {
                         const moveNum = Math.floor(i / 2) + 1;
@@ -1299,6 +1440,7 @@ class BattleWebServer:
                         moveText += '\\n';
                     }
 
+                    console.log('Copying moves:', moveText); // Debug log
                     await navigator.clipboard.writeText(moveText.trim());
 
                     // Show feedback
@@ -1308,6 +1450,8 @@ class BattleWebServer:
                     setTimeout(() => {
                         btn.textContent = originalText;
                     }, 2000);
+                } else {
+                    alert('No moves to copy');
                 }
             } catch (error) {
                 console.error('Failed to copy moves:', error);
@@ -1357,6 +1501,16 @@ class BattleWebServer:
 
                     // Reset board to starting position
                     initializeBoard();
+
+                    // Clear moves list
+                    document.getElementById('movesContent').innerHTML = 'No moves yet';
+
+                    // Update game info
+                    document.getElementById('gameInfo').innerHTML = `
+                        <h3>Game Created!</h3>
+                        <p>${whiteText} vs ${blackText}</p>
+                        <p>Click "Start Battle" to begin</p>
+                    `;
                 }
             } catch (error) {
                 alert('Error creating game: ' + error.message);
@@ -1391,11 +1545,15 @@ class BattleWebServer:
                     document.getElementById('stopGameBtn').disabled = false;
                     updateGameStatus('Battle in progress!');
 
+                    // Update game info
+                    document.getElementById('gameInfo').innerHTML = `
+                        <h3>Battle in Progress!</h3>
+                        <p>⚔️ AI vs AI Chess Battle</p>
+                        <p>Depth: ${depth}, Time: ${moveTime}s per move</p>
+                    `;
+
                     // Start auto-refresh
                     refreshInterval = setInterval(refreshGameState, 1000);
-
-                    // Show moves list
-                    document.getElementById('movesList').style.display = 'block';
                 }
             } catch (error) {
                 alert('Error starting game: ' + error.message);
@@ -1444,9 +1602,23 @@ class BattleWebServer:
                 switch (game.status) {
                     case 'waiting':
                         statusText = 'Waiting to start';
+                        // Update game info for waiting state
+                        document.getElementById('gameInfo').innerHTML = `
+                            <h3>Game Ready</h3>
+                            <p>${game.white_engine} vs ${game.black_engine}</p>
+                            <p>Click "Start Battle" to begin</p>
+                        `;
                         break;
                     case 'playing':
                         statusText = `Battle in progress (${game.moves.length} moves)`;
+                        // Update game info for playing state
+                        const lastMove = game.moves.length > 0 ? game.moves[game.moves.length - 1] : null;
+                        const moveInfo = lastMove ? `Last: ${lastMove.move} by ${lastMove.player}` : 'Starting...';
+                        document.getElementById('gameInfo').innerHTML = `
+                            <h3>⚔️ Battle in Progress!</h3>
+                            <p>${game.white_engine} vs ${game.black_engine}</p>
+                            <p>Move ${Math.ceil(game.moves.length / 2)} • ${moveInfo}</p>
+                        `;
                         break;
                     case 'finished':
                         // Parse and display the result prominently
@@ -1483,6 +1655,13 @@ class BattleWebServer:
                         gameResultDiv.className = `game-result ${resultClass}`;
                         gameResultDiv.style.display = 'block';
 
+                        // Update game info for finished state
+                        document.getElementById('gameInfo').innerHTML = `
+                            <h3>🏁 Game Finished!</h3>
+                            <p>${game.white_engine} vs ${game.black_engine}</p>
+                            <p>Total moves: ${game.moves.length} • ${game.result}</p>
+                        `;
+
                         if (refreshInterval) {
                             clearInterval(refreshInterval);
                             refreshInterval = null;
@@ -1503,7 +1682,16 @@ class BattleWebServer:
 
                 game.moves.forEach((move, index) => {
                     const moveDiv = document.createElement('div');
-                    moveDiv.className = `move-item ${move.player.toLowerCase()}`;
+                    let className = `move-item ${move.player.toLowerCase()}`;
+
+                    // Add special styling for checkmate and check moves
+                    if (move.move.endsWith('#')) {
+                        className += ' move-checkmate';
+                    } else if (move.move.endsWith('+')) {
+                        className += ' move-check';
+                    }
+
+                    moveDiv.className = className;
                     moveDiv.innerHTML = `<span>${move.move_num}. ${move.move}</span><span>${move.player} (${move.time_taken.toFixed(2)}s)</span>`;
                     movesContent.appendChild(moveDiv);
 
