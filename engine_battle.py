@@ -234,7 +234,19 @@ class EngineWrapper:
         """Check if the game is over"""
         try:
             if self.engine_type == "augment":
-                return self.engine.is_game_over()
+                is_over, result = self.engine.is_game_over()
+                if is_over and result:
+                    # Improve the result message to clearly show who won
+                    if "checkmate" in result.lower():
+                        # The player who just moved delivered checkmate, so they won
+                        # white_to_move is False when it's white's turn (after black moved)
+                        winner = "Black" if self.engine.board.white_to_move else "White"
+                        return True, f"{winner} wins by checkmate"
+                    elif "stalemate" in result.lower():
+                        return True, "Draw by stalemate"
+                    else:
+                        return True, result
+                return is_over, result
             elif self.engine_type == "claude":
                 # Use Claude engine's built-in game over detection
                 moves = self.engine.generate_moves()
@@ -387,49 +399,46 @@ class EngineBattle:
                 move_str, time_taken = current_engine.get_best_move(depth, move_time)
 
                 if not move_str:
-                    print(f"ENGINE ERROR: {current_engine.engine_name} returned no move")
+                    print(f"=== ENGINE MOVE GENERATION ERROR ===", flush=True)
+                    print(f"ENGINE ERROR: {current_engine.engine_name} returned no move", flush=True)
+                    print(f"This likely indicates the engines are out of sync", flush=True)
 
                     # Try to get available moves for debugging
                     try:
                         if current_engine.engine_type == "claude":
                             moves = current_engine.engine.generate_moves()
-                            print(f"Claude engine has {len(moves) if moves else 0} available moves")
+                            print(f"Claude engine reports {len(moves) if moves else 0} available moves", flush=True)
                             if moves:
-                                print(f"Sample moves: {moves[:5]}")
+                                print(f"Sample legal moves: {moves[:5]}", flush=True)
+                            else:
+                                print("Claude engine sees NO legal moves - may be checkmate/stalemate or invalid state", flush=True)
                         elif current_engine.engine_type == "augment":
                             moves = current_engine.engine.get_legal_moves()
-                            print(f"Augment engine has {len(moves) if moves else 0} available moves")
+                            print(f"Augment engine reports {len(moves) if moves else 0} available moves", flush=True)
                             if moves:
-                                print(f"Sample moves: {[str(m) for m in moves[:5]]}")
+                                print(f"Sample legal moves: {[str(m) for m in moves[:5]]}", flush=True)
+                            else:
+                                print("Augment engine sees NO legal moves - may be checkmate/stalemate or invalid state", flush=True)
+                                
+                        # Check if this is actually game over vs. engine error
+                        game_over, result = current_engine.is_game_over()
+                        if game_over:
+                            print(f"Game is actually over: {result}", flush=True)
+                            game.result = result
+                        else:
+                            print("Game should not be over - this is an engine synchronization error", flush=True)
+                            game.result = f"Engine synchronization error: {current_engine.engine_name} could not generate a move (engines out of sync)"
+                            
                     except Exception as e:
-                        print(f"Could not get moves for debugging: {e}")
+                        print(f"Could not get moves for debugging: {e}", flush=True)
+                        game.result = f"Engine error: {current_engine.engine_name} could not generate a move"
 
-                    game.result = f"Engine error: {current_engine.engine_name} could not generate a move"
                     game.status = "finished"
                     break
 
-                # Validate the move looks reasonable
-                print(f"=== ENGINE MOVE DEBUG ===", flush=True)
-                print(f"Engine {current_engine.engine_name} suggests: {move_str}", flush=True)
-                if len(move_str) >= 4:
-                    from_sq = move_str[:2]
-                    to_sq = move_str[2:4]
-                    print(f"  Move details: {from_sq} -> {to_sq}", flush=True)
-                    if len(move_str) == 5:
-                        print(f"  Promotion to: {move_str[4]}", flush=True)
-
-                    # Check if this looks like a reasonable pawn promotion
-                    if len(move_str) == 5 and move_str[4].upper() in 'QRBN':
-                        from_rank = int(move_str[1])
-                        to_rank = int(move_str[3])
-                        if current_engine == white_engine:
-                            # White pawn promotion should be from 7th rank to 8th rank
-                            if from_rank != 7 or to_rank != 8:
-                                print(f"  WARNING: Suspicious white promotion move: {move_str}", flush=True)
-                        else:
-                            # Black pawn promotion should be from 2nd rank to 1st rank
-                            if from_rank != 2 or to_rank != 1:
-                                print(f"  WARNING: Suspicious black promotion move: {move_str}", flush=True)
+                # Validate the move looks reasonable (reduced debug output)
+                if len(move_str) == 5 and move_str[4].upper() in 'QRBN':
+                    print(f"Promotion move: {move_str}", flush=True)
 
                 # Clean up the move string to handle promotion properly
                 clean_move = move_str
@@ -437,15 +446,12 @@ class EngineBattle:
                     # This is a promotion move - some engines might not expect the promotion piece
                     base_move = move_str[:4]
                     promotion_piece = move_str[4].upper()
-                    print(f"Promotion move detected: {base_move} promotes to {promotion_piece}", flush=True)
                 else:
                     base_move = move_str
                     promotion_piece = None
 
                 # Make move on both engines
-                print(f"Making move {move_str} on {current_engine.engine_name}", flush=True)
                 current_success = current_engine.make_move(move_str)
-                print(f"Move result for {current_engine.engine_name}: {current_success}", flush=True)
                 if not current_success:
                     print(f"INVALID MOVE DETECTED:", flush=True)
                     print(f"  Engine: {current_engine.engine_name}", flush=True)
@@ -465,9 +471,7 @@ class EngineBattle:
                 other_engine = black_engine if current_engine == white_engine else white_engine
 
                 # Try the move with the other engine, with fallback for promotion format differences
-                print(f"Validating move {move_str} with {other_engine.engine_name}", flush=True)
                 other_success = other_engine.make_move(move_str)
-                print(f"Validation result from {other_engine.engine_name}: {other_success}", flush=True)
 
                 if not other_success and promotion_piece:
                     # Try various promotion format alternatives
@@ -488,10 +492,9 @@ class EngineBattle:
 
                     for alternative in alternatives_to_try:
                         if alternative != move_str:  # Don't retry the same move
-                            print(f"Retrying with alternative format: {alternative}", flush=True)
                             other_success = other_engine.make_move(alternative)
-                            print(f"Alternative result from {other_engine.engine_name}: {other_success}", flush=True)
                             if other_success:
+                                print(f"Move accepted with alternative format: {alternative}", flush=True)
                                 break
 
                 if not other_success:
@@ -515,12 +518,11 @@ class EngineBattle:
                     except Exception as e:
                         print(f"Could not get legal moves from other engine: {e}")
 
-                    # The issue might be that the move is actually illegal
-                    # Let's continue the game instead of stopping it for now
-                    print(f"WARNING: Continuing game despite move rejection (engines may be out of sync)")
-                    # game.result = f"Engine synchronization error: {other_engine.engine_name} rejected {move_str}"
-                    # game.status = "finished"
-                    # break
+                    # Stop the game due to synchronization error - engines are out of sync
+                    print(f"STOPPING GAME: Engines are out of sync and cannot continue reliably")
+                    game.result = f"Engine synchronization error: {other_engine.engine_name} rejected {move_str} - engines have divergent board states"
+                    game.status = "finished"
+                    break
 
                 # Record move
                 player = "White" if current_engine == white_engine else "Black"
@@ -727,15 +729,17 @@ class BattleWebServer:
         }
         .content {
             display: grid;
-            grid-template-columns: 1fr 400px;
+            grid-template-columns: 1fr 350px;
             gap: 20px;
             padding: 20px;
             min-height: 600px;
         }
         .game-area {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            padding: 0;
+            margin: 0;
         }
         .controls {
             background: #fff;
@@ -746,8 +750,8 @@ class BattleWebServer:
         .board-container {
             display: flex;
             flex-direction: column;
-            align-items: center;
-            margin: 20px auto;
+            align-items: flex-start;
+            margin: 0;
             width: fit-content;
         }
         .board-with-labels {
@@ -764,7 +768,7 @@ class BattleWebServer:
             grid-template-rows: repeat(8, 50px);
             gap: 0px;
             border: 2px solid #8B4513;
-            margin: 20px auto;
+            margin: 0;
         }
         .rank-label {
             grid-column: 1;
@@ -807,9 +811,9 @@ class BattleWebServer:
         }
         .game-info {
             background: #e3f2fd;
-            padding: 15px;
+            padding: 10px;
             border-radius: 8px;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
         }
         .moves-list {
             max-height: 300px;
@@ -925,7 +929,7 @@ class BattleWebServer:
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 10px;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
         }
         .engine-card {
             padding: 15px;
@@ -969,19 +973,22 @@ class BattleWebServer:
         .captured-pieces {
             background: #f8f9fa;
             border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
+            padding: 10px;
+            margin: 5px 0;
+            width: fit-content;
         }
         .captured-container {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
         }
         .captured-white, .captured-black {
-            padding: 10px;
+            padding: 8px;
             border-radius: 4px;
             background: white;
             border: 1px solid #ddd;
+            min-width: 80px;
+            text-align: center;
         }
         .captured-label {
             font-weight: bold;
