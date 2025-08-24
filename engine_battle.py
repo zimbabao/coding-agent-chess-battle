@@ -1056,39 +1056,85 @@ class BattleWebServer:
             100% { opacity: 1; }
         }
         .captured-pieces {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 10px;
-            margin: 5px 0;
-            width: fit-content;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            width: 100%;
+            max-width: 600px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .captured-pieces h4 {
+            margin: 0 0 15px 0;
+            text-align: center;
+            color: #495057;
+            font-size: 16px;
+            font-weight: bold;
         }
         .captured-container {
-            display: flex;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
             gap: 20px;
-            align-items: flex-start;
+            align-items: stretch;
         }
         .captured-white, .captured-black {
-            padding: 8px;
-            border-radius: 4px;
-            background: white;
-            border: 1px solid #ddd;
-            min-width: 80px;
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 80px;
             text-align: center;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        .captured-white {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            border: 2px solid #dee2e6;
+        }
+        .captured-white:hover {
+            border-color: #adb5bd;
+        }
+        .captured-black {
+            background: linear-gradient(135deg, #f1f3f4 0%, #e9ecef 100%);
+            border: 2px solid #adb5bd;
+        }
+        .captured-black:hover {
+            border-color: #6c757d;
         }
         .captured-label {
             font-weight: bold;
-            font-size: 12px;
+            font-size: 14px;
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 10px;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .captured-list {
             display: flex;
             flex-wrap: wrap;
-            gap: 2px;
+            gap: 8px;
+            justify-content: center;
+            align-items: center;
+            min-height: 40px;
+            flex: 1;
         }
         .captured-piece {
-            font-size: 18px;
+            font-size: 24px;
             display: inline-block;
+            padding: 4px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            transition: transform 0.2s ease;
+        }
+        .captured-piece:hover {
+            transform: scale(1.2);
+        }
+        .captured-list:empty::after {
+            content: "None taken";
+            color: #adb5bd;
+            font-style: italic;
+            font-size: 12px;
         }
         .copy-btn {
             background: #28a745;
