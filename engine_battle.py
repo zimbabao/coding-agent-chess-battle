@@ -766,29 +766,34 @@ class BattleWebServer:
         }
         .content {
             display: grid;
-            grid-template-columns: auto 350px;
-            gap: 20px;
+            grid-template-columns: 1fr 400px;
+            gap: 30px;
             padding: 20px;
             min-height: 600px;
-            justify-content: start;
+            max-width: 1400px;
+            margin: 0 auto;
         }
         .game-area {
             display: flex;
             flex-direction: column;
-            align-items: flex-start;
-            padding: 0;
-            margin: 0;
+            align-items: center;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            width: 100%;
         }
         .controls {
             background: #fff;
             border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 20px;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            height: fit-content;
         }
         .board-container {
             display: flex;
             flex-direction: column;
-            align-items: flex-start;
+            align-items: center;
             margin: 0;
             width: fit-content;
         }
@@ -802,11 +807,12 @@ class BattleWebServer:
         }
         .chess-board {
             display: grid;
-            grid-template-columns: repeat(8, 50px);
-            grid-template-rows: repeat(8, 50px);
+            grid-template-columns: repeat(8, 60px);
+            grid-template-rows: repeat(8, 60px);
             gap: 0px;
-            border: 2px solid #8B4513;
-            margin: 0;
+            border: 3px solid #8B4513;
+            margin: 20px 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
         .rank-label {
             grid-column: 1;
@@ -827,12 +833,12 @@ class BattleWebServer:
             font-size: 14px;
         }
         .square {
-            width: 50px;
-            height: 50px;
+            width: 60px;
+            height: 60px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 32px;
+            font-size: 38px;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.2s;
