@@ -1,43 +1,96 @@
 # Chess Search Algorithms
+#
+# This module implements the chess engine's search algorithms for finding the best move.
+# It uses minimax search with alpha-beta pruning and quiescence search to evaluate
+# positions and select optimal moves.
+#
+# Key features:
+# - Minimax algorithm with alpha-beta pruning for efficient search
+# - Quiescence search to avoid horizon effect (evaluating only "quiet" positions)
+# - Transposition table for caching previously evaluated positions
+# - Time management to stay within search time limits
+# - Move ordering for better alpha-beta pruning efficiency
 
 from evaluation import evaluate_board
 from utils import *
 import time
 
 class SearchEngine:
+    """
+    Chess search engine using minimax with alpha-beta pruning
+
+    This class implements the core search algorithm that finds the best move
+    in a chess position by searching through possible move sequences.
+
+    Attributes:
+        nodes_searched: Count of positions evaluated in current search
+        start_time: Timestamp when current search started
+        time_limit: Maximum time allowed for current search (seconds)
+        max_depth: Maximum depth to search in plies (half-moves)
+        transposition_table: Cache of previously evaluated positions
+    """
+
     def __init__(self):
+        """Initialize the search engine with default parameters"""
         self.nodes_searched = 0
         self.start_time = 0
         self.time_limit = 0
         self.max_depth = 6
         self.transposition_table = {}
-    
+
     def is_time_up(self):
-        """Check if search time limit has been exceeded."""
+        """
+        Check if search time limit has been exceeded
+
+        Returns:
+            True if time limit exceeded, False otherwise or if no limit set
+        """
         if self.time_limit <= 0:
             return False
         return time.time() - self.start_time >= self.time_limit
-    
+
     def clear_transposition_table(self):
-        """Clear the transposition table."""
+        """
+        Clear the transposition table cache
+
+        Should be called between games or when board state changes significantly
+        to avoid using stale cached evaluations.
+        """
         self.transposition_table.clear()
-    
+
     def minimax(self, board, depth, alpha, beta, maximizing_player):
-        """Minimax search with alpha-beta pruning."""
+        """
+        Minimax search with alpha-beta pruning
+
+        This is the core recursive search algorithm that evaluates positions
+        by assuming both players play optimally.
+
+        Args:
+            board: ChessBoard to search from
+            depth: Remaining search depth in plies
+            alpha: Best score guaranteed for maximizing player (alpha bound)
+            beta: Best score guaranteed for minimizing player (beta bound)
+            maximizing_player: True if current player is maximizing, False if minimizing
+
+        Returns:
+            Evaluation score for this position
+        """
         self.nodes_searched += 1
-        
-        # Check time limit
+
+        # Check if we've exceeded the time limit
         if self.is_time_up():
             return evaluate_board(board)
-        
+
         # Base case: maximum depth reached or terminal position
         if depth == 0:
             return evaluate_board(board)
-        
+
+        # Get all legal moves
         legal_moves = board.generate_legal_moves()
         if not legal_moves:
+            # No legal moves - position evaluation handles checkmate/stalemate
             return evaluate_board(board)
-        
+
         if maximizing_player:
             max_eval = float('-inf')
             for move in legal_moves:

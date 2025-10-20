@@ -83,36 +83,88 @@ except Exception as e:
     print(f"Warning: Could not import Claude engine: {e}")
 
 class HumanPlayer:
-    """Simple human player interface"""
+    """
+    Simple human player interface for engine battles
+
+    This class provides a minimal interface for human players to interact with
+    the chess engine battle system through the web interface. It tracks basic
+    game state and handles move input from the user.
+    """
     def __init__(self):
+        # Track which side is to move (True = white, False = black)
         self.white_to_move = True
+        # Store the move input from the web interface until it's processed
         self.pending_move = None
+        # Track captured pieces for display purposes
         self.captured_pieces = {'white': [], 'black': []}
 
     def generate_moves(self):
-        # Return empty list - human will input move via web interface
+        """
+        Generate list of legal moves
+
+        Returns empty list since human players input moves manually via the
+        web interface rather than programmatically generating moves.
+        """
         return []
 
     def make_move(self, move_str: str) -> bool:
-        # Simple validation - assume move is valid for now
-        # In a real implementation, we'd validate against chess rules
+        """
+        Process a move from the human player
+
+        Args:
+            move_str: Move in UCI format (e.g., "e2e4")
+
+        Returns:
+            True if move was accepted (simplified - always returns True)
+
+        Note: This is a simplified implementation. A complete version would
+        validate the move against actual chess rules.
+        """
+        # Toggle the side to move
         self.white_to_move = not self.white_to_move
         return True
 
     def is_in_check(self):
-        return False  # Simplified for now
+        """
+        Check if current player is in check
+
+        Returns:
+            False (simplified implementation - actual check detection not implemented)
+        """
+        return False
 
     def get_pending_move(self):
+        """
+        Retrieve and clear the pending move from the web interface
+
+        Returns:
+            The pending move string, or None if no move is pending
+        """
         move = self.pending_move
         self.pending_move = None
         return move
 
     def set_move(self, move_str: str):
+        """
+        Set a move from the web interface to be processed
+
+        Args:
+            move_str: Move in UCI format from the user
+        """
         self.pending_move = move_str
 
 @dataclass
 class GameMove:
-    """Represents a single move in the game"""
+    """
+    Represents a single move in a chess game
+
+    Attributes:
+        move_num: The move number in the game (increments after black's move)
+        player: The player making the move ("White" or "Black")
+        move: The move in UCI notation (e.g., "e2e4" or "e7e8q" for promotion)
+        time_taken: Time in seconds that the engine spent calculating this move
+        evaluation: Optional evaluation score from the engine's perspective
+    """
     move_num: int
     player: str
     move: str
@@ -121,7 +173,20 @@ class GameMove:
 
 @dataclass
 class GameState:
-    """Current state of the battle"""
+    """
+    Represents the complete state of an engine battle game
+
+    Attributes:
+        game_id: Unique identifier for this game
+        white_engine: Name of the engine playing white pieces
+        black_engine: Name of the engine playing black pieces
+        current_position: Current board position in FEN (Forsyth-Edwards Notation)
+        moves: List of all moves made in the game so far
+        status: Current game status ('waiting', 'playing', or 'finished')
+        result: Game result string (e.g., "White wins by checkmate") if finished
+        start_time: ISO format timestamp when the game started
+        end_time: ISO format timestamp when the game ended (if finished)
+    """
     game_id: str
     white_engine: str
     black_engine: str
@@ -133,46 +198,94 @@ class GameState:
     end_time: Optional[str] = None
 
 class EngineWrapper:
-    """Wrapper to standardize engine interfaces"""
+    """
+    Wrapper to standardize different chess engine interfaces
+
+    This class provides a unified interface for interacting with different chess
+    engines (Augment, Claude, or Human player). It handles the differences in
+    their APIs and provides consistent methods for getting moves, making moves,
+    and checking game state.
+
+    Attributes:
+        engine_type: Type of engine ("augment", "claude", or "human")
+        engine_name: Display name of the engine
+        engine: The underlying engine instance
+    """
 
     def __init__(self, engine_type: str, engine_name: str, **kwargs):
+        """
+        Initialize the engine wrapper
+
+        Args:
+            engine_type: Type of engine to wrap ("augment", "claude", "human")
+            engine_name: Human-readable name for the engine
+            **kwargs: Additional arguments (e.g., chess960, position_id)
+        """
         self.engine_type = engine_type
         self.engine_name = engine_name
         self.engine = None
         self._initialize_engine(**kwargs)
 
     def _initialize_engine(self, **kwargs):
-        """Initialize the specific engine"""
+        """
+        Initialize the specific engine based on engine_type
+
+        Args:
+            **kwargs: Engine-specific initialization parameters
+                chess960: Whether to use Chess960 variant
+                position_id: Specific Chess960 starting position (0-959)
+
+        Raises:
+            ValueError: If the requested engine type is not available
+        """
         if self.engine_type == "augment" and AUGMENT_AVAILABLE:
+            # Initialize the Augment chess engine
             chess960 = kwargs.get('chess960', False)
             position_id = kwargs.get('position_id', None)
             self.engine = AugmentEngine(chess960=chess960, position_id=position_id)
         elif self.engine_type == "claude" and CLAUDE_AVAILABLE:
+            # Initialize the Claude chess engine
             chess960 = kwargs.get('chess960', False)
             position_id = kwargs.get('position_id', None)
             self.engine = ClaudeBoard(chess960=chess960, position_id=position_id)
         elif self.engine_type == "human":
-            # Human player - we'll use a simple board representation
+            # Initialize human player interface (no actual engine needed)
             self.engine = HumanPlayer()
         else:
             raise ValueError(f"Engine type '{self.engine_type}' not available")
 
     def get_best_move(self, depth: int = 4, time_limit: float = 5.0) -> Tuple[str, float]:
-        """Get the best move from the engine"""
+        """
+        Get the best move from the engine
+
+        This method handles getting moves from different engine types, each with
+        their own API and characteristics.
+
+        Args:
+            depth: Search depth for engines that use it (default: 4 plies)
+            time_limit: Maximum time in seconds to spend on move calculation
+
+        Returns:
+            Tuple of (move_string, time_elapsed) where:
+                - move_string: UCI format move (e.g., "e2e4") or None if no move
+                - time_elapsed: Actual time spent calculating in seconds
+        """
         start_time = time.time()
 
         if self.engine_type == "augment":
             try:
-                # Augment engine returns just a Move object
+                # Augment engine uses a search algorithm with depth and time limit
+                # Returns a Move object that needs to be converted to UCI string
                 move = self.engine.get_best_move(depth=depth, time_limit=time_limit)
                 if move:
-                    # Convert move object to UCI string
+                    # Convert move object to UCI string format
                     move_str = str(move)  # Move class has __str__ method that returns UCI format
                 else:
                     move_str = None
                 elapsed = time.time() - start_time
                 return move_str, elapsed
             except Exception as e:
+                # Log detailed error information for debugging
                 print(f"Augment engine error: {e}")
                 import traceback
                 print(f"Augment engine traceback: {traceback.format_exc()}")
@@ -180,26 +293,29 @@ class EngineWrapper:
 
         elif self.engine_type == "claude":
             try:
-                # Claude engine: get moves and pick the first one (simple strategy)
-                moves = self.engine.generate_moves()  # Fixed: correct method name
+                # Claude engine currently uses a simple strategy: generate all legal
+                # moves and pick the first one. This is a placeholder implementation.
+                # TODO: Add proper search algorithm integration
+                moves = self.engine.generate_moves()
                 print(f"Claude moves generated: {len(moves) if moves else 0}")
                 if moves:
                     print(f"First move type: {type(moves[0])}, value: {repr(moves[0])}")
                     # For now, just take the first legal move
-                    # TODO: Add proper search algorithm integration
                     move_str = str(moves[0])  # Ensure it's a string
                 else:
                     move_str = None
                 elapsed = time.time() - start_time
                 return move_str, elapsed
             except Exception as e:
+                # Log detailed error information for debugging
                 print(f"Claude engine error: {e}")
                 import traceback
                 print(f"Claude engine traceback: {traceback.format_exc()}")
                 return None, time.time() - start_time
 
         elif self.engine_type == "human":
-            # Wait for human input
+            # Wait for human input from the web interface
+            # Poll for pending move until timeout is reached
             print(f"Waiting for human player move...")
             timeout = time_limit
             while timeout > 0:
@@ -207,18 +323,29 @@ class EngineWrapper:
                 if move:
                     elapsed = time.time() - start_time
                     return move, elapsed
+                # Small sleep to avoid busy waiting
                 time.sleep(0.1)
                 timeout -= 0.1
 
-            # Timeout - no move received
+            # Timeout reached without receiving a move
             print("Human player timeout")
             return None, time.time() - start_time
 
+        # Should never reach here, but return None for safety
         return None, 0.0
 
     def make_move(self, move_str: str) -> bool:
-        """Make a move on the engine's board"""
+        """
+        Make a move on the engine's internal board
+
+        Args:
+            move_str: Move in UCI format (e.g., "e2e4" or "e7e8q")
+
+        Returns:
+            True if the move was legal and successfully made, False otherwise
+        """
         try:
+            # All engine types have a make_move method, so we can call it uniformly
             if self.engine_type == "augment":
                 return self.engine.make_move(move_str)
             elif self.engine_type == "claude":
@@ -227,6 +354,7 @@ class EngineWrapper:
                 return self.engine.make_move(move_str)
             return False
         except Exception as e:
+            # Log error and return False to indicate move failed
             print(f"Error making move {move_str} on {self.engine_type}: {e}")
             return False
 
@@ -305,9 +433,28 @@ class EngineWrapper:
             self._initialize_engine(**kwargs)
 
 class EngineBattle:
-    """Main class managing engine battles"""
+    """
+    Main class managing chess engine battles
+
+    This class orchestrates games between different chess engines, managing
+    game state, move execution, and providing a web interface for monitoring.
+    Games run in separate threads to allow non-blocking operation.
+
+    Attributes:
+        port: Web server port for the battle interface
+        games: Dictionary of all games indexed by game_id
+        current_game: Reference to the currently active game
+        game_thread: Thread running the current game
+        stop_game: Event flag to signal game termination
+    """
 
     def __init__(self, port: int = 8003):
+        """
+        Initialize the engine battle system
+
+        Args:
+            port: Port number for the web interface (default: 8003)
+        """
         self.port = port
         self.games: Dict[str, GameState] = {}
         self.current_game: Optional[GameState] = None
@@ -316,16 +463,30 @@ class EngineBattle:
 
     def create_game(self, white_engine: str, black_engine: str,
                    game_format: str = "standard", **kwargs) -> str:
-        """Create a new game between two engines"""
+        """
+        Create a new game between two engines
+
+        Args:
+            white_engine: Name of engine playing white pieces
+            black_engine: Name of engine playing black pieces
+            game_format: "standard" or "chess960" (default: "standard")
+            **kwargs: Additional parameters (e.g., position_id for Chess960)
+
+        Returns:
+            Unique game_id for the created game
+        """
+        # Create unique game identifier based on current timestamp
         game_id = f"game_{int(time.time())}"
 
-        # Initialize engines
+        # Prepare engine initialization parameters
         engine_kwargs = {}
         if game_format == "chess960":
             engine_kwargs['chess960'] = True
             if 'position_id' in kwargs:
                 engine_kwargs['position_id'] = kwargs['position_id']
 
+        # Create game state with starting position
+        # FEN string represents standard chess starting position
         game_state = GameState(
             game_id=game_id,
             white_engine=white_engine,
@@ -336,6 +497,7 @@ class EngineBattle:
             start_time=datetime.now().isoformat()
         )
 
+        # Store game and set as current
         self.games[game_id] = game_state
         self.current_game = game_state
 

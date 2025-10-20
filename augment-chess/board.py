@@ -1,14 +1,51 @@
 # Chess Board Representation and Move Generation
+#
+# This module implements the core chess board representation using a bitboard-like
+# approach with array-based storage. It handles:
+# - Board state management (piece positions, colors, castling rights, en passant)
+# - Legal move generation for all piece types
+# - Move execution and undo functionality
+# - Chess960 (Fischer Random Chess) support
+# - Check and checkmate detection
 
 from utils import *
 import copy
 
 class ChessBoard:
+    """
+    Chess board representation with move generation
+
+    Represents the chess board state using parallel arrays for pieces and colors.
+    Supports both standard chess and Chess960 variant.
+
+    Attributes:
+        chess960: Whether this is a Chess960 game
+        position_id: Chess960 starting position (0-959) if applicable
+        board: Array of 64 squares containing piece types
+        colors: Array of 64 squares containing piece colors
+        to_move: Current side to move (WHITE or BLACK)
+        castling_rights: Dict of available castling rights (K, Q, k, q)
+        en_passant_square: Square where en passant capture is legal (or None)
+        halfmove_clock: Moves since last pawn move or capture (for 50-move rule)
+        fullmove_number: Current move number (increments after black's move)
+        move_history: List of all moves made (for undo functionality)
+        original_king_file: Original king file position (for Chess960 castling)
+        original_rook_files: Original rook file positions (for Chess960 castling)
+    """
+
     def __init__(self, chess960=False, position_id=None):
+        """
+        Initialize a chess board
+
+        Args:
+            chess960: If True, set up Chess960 variant (default: False)
+            position_id: Specific Chess960 position 0-959, or None for random/standard
+        """
         self.chess960 = chess960
         self.position_id = position_id
 
-        # Chess960 specific attributes
+        # Chess960 specific attributes for castling
+        # Track original king and rook positions to determine castling destinations
         self.original_king_file = {'white': 4, 'black': 4}  # Standard position
         self.original_rook_files = {'white': {'kingside': 7, 'queenside': 0},
                                    'black': {'kingside': 7, 'queenside': 0}}

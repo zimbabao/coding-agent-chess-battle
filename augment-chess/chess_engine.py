@@ -1,4 +1,8 @@
 # Main Chess Engine Class
+#
+# This module provides the high-level chess engine interface that coordinates
+# the board representation, move generation, search algorithms, and position
+# evaluation. It supports both standard chess and Chess960 (Fischer Random Chess).
 
 from board import ChessBoard
 from search import SearchEngine
@@ -7,16 +11,47 @@ from utils import *
 import time
 
 class ChessEngine:
+    """
+    Main chess engine class that coordinates all chess-related functionality
+
+    This class serves as the primary interface to the chess engine, managing:
+    - Board state and move history
+    - Move generation and validation
+    - Position search and evaluation
+    - Game state detection (checkmate, stalemate, draws)
+    - Support for both standard and Chess960 variants
+
+    Attributes:
+        chess960: Whether this is a Chess960 game
+        position_id: Chess960 starting position ID (0-959) if applicable
+        board: The current chess board state
+        search_engine: Engine for searching and evaluating positions
+        game_history: List of all moves made in the game
+        _move_cache: Cache for performance optimization
+    """
+
     def __init__(self, chess960=False, position_id=None):
+        """
+        Initialize the chess engine
+
+        Args:
+            chess960: If True, use Chess960 variant (default: False)
+            position_id: Specific Chess960 position (0-959), or None for random/standard
+        """
         self.chess960 = chess960
         self.position_id = position_id
         self.board = ChessBoard(chess960=chess960, position_id=position_id)
         self.search_engine = SearchEngine()
         self.game_history = []
-        self._move_cache = {}  # Performance caching
-        
+        self._move_cache = {}  # Performance caching for move generation
+
     def reset_game(self):
-        """Reset the game to starting position."""
+        """
+        Reset the game to the starting position
+
+        This clears all game state including move history, caches, and the
+        transposition table, and reinitializes the board to the starting position.
+        """
         self.board = ChessBoard(chess960=self.chess960, position_id=self.position_id)
         self.game_history = []
         self.search_engine.clear_transposition_table()
@@ -32,23 +67,39 @@ class ChessEngine:
             self.reset_game()
     
     def make_move(self, move_str):
-        """Make a move given in UCI format."""
+        """
+        Make a move given in UCI format
+
+        Parses a UCI format move string (e.g., "e2e4" or "e7e8q" for promotion),
+        validates it against legal moves, and executes it if valid.
+
+        Args:
+            move_str: Move in UCI notation (e.g., "e2e4", "e7e8q")
+
+        Returns:
+            True if the move was legal and executed successfully, False otherwise
+        """
         try:
+            # Parse UCI move string into a Move object
             move = parse_uci_move(move_str)
+            # Generate all legal moves in the current position
             legal_moves = self.board.generate_legal_moves()
-            
-            # Find the matching legal move
+
+            # Find the matching legal move by comparing source, destination, and promotion
             for legal_move in legal_moves:
                 if (legal_move.from_square == move.from_square and
                     legal_move.to_square == move.to_square and
                     legal_move.promotion == move.promotion):
-                    
+
+                    # Execute the move on the board and record it in history
                     self.board.make_move(legal_move)
                     self.game_history.append(legal_move)
                     return True
-            
-            return False  # Illegal move
+
+            # Move not found in legal moves - it's illegal
+            return False
         except:
+            # Parsing error or other exception - treat as illegal move
             return False
     
     def undo_move(self):
@@ -64,23 +115,40 @@ class ChessEngine:
         return self.board.generate_legal_moves()
     
     def is_game_over(self):
-        """Check if the game is over."""
+        """
+        Check if the game is over and determine the result
+
+        Checks for all possible game-ending conditions:
+        - Checkmate: No legal moves and king is in check
+        - Stalemate: No legal moves but king is not in check
+        - Insufficient material: Not enough pieces to force checkmate
+        - 50-move rule: 50 moves without pawn move or capture
+        - Threefold repetition: Same position occurred three times
+
+        Returns:
+            Tuple of (is_over, result_string) where:
+                - is_over: True if game is over, False otherwise
+                - result_string: Description of how the game ended, or None if ongoing
+        """
+        # First check if there are any legal moves
         legal_moves = self.board.generate_legal_moves()
         if not legal_moves:
+            # No legal moves - either checkmate or stalemate
             return True, "checkmate" if self.board.is_in_check(self.board.to_move) else "stalemate"
-        
-        # Check for insufficient material
+
+        # Check for insufficient material (e.g., K vs K, K+B vs K)
         if self.is_insufficient_material():
             return True, "insufficient material"
-        
-        # Check for 50-move rule
+
+        # Check for 50-move rule (halfmove_clock is in half-moves, so 100 = 50 full moves)
         if self.board.halfmove_clock >= 100:
             return True, "50-move rule"
-        
-        # Check for threefold repetition (simplified)
+
+        # Check for threefold repetition (simplified implementation)
         if self.is_threefold_repetition():
             return True, "threefold repetition"
-        
+
+        # Game is still ongoing
         return False, None
     
     def is_insufficient_material(self):
@@ -129,17 +197,45 @@ class ChessEngine:
         return False
     
     def get_best_move(self, depth=6, time_limit=0):
-        """Get the best move using the search engine."""
+        """
+        Get the best move using the search engine
+
+        Uses the minimax search algorithm with alpha-beta pruning and quiescence
+        search to find the best move in the current position.
+
+        Args:
+            depth: Search depth in plies (half-moves) - default is 6
+            time_limit: Maximum time in seconds for the search (0 = no limit)
+
+        Returns:
+            Best Move object, or None if no legal moves available
+        """
         return self.search_engine.search_best_move_with_quiescence(
             self.board, depth, time_limit
         )
-    
+
     def evaluate_position(self):
-        """Evaluate the current position."""
+        """
+        Evaluate the current board position
+
+        Returns a numerical score representing the position evaluation from
+        white's perspective (positive = white advantage, negative = black advantage).
+
+        Returns:
+            Evaluation score as a float
+        """
         return evaluate_board(self.board)
 
     def evaluate(self, board=None):
-        """Evaluate the given board position."""
+        """
+        Evaluate a given board position
+
+        Args:
+            board: ChessBoard to evaluate, or None to use current board
+
+        Returns:
+            Evaluation score from white's perspective
+        """
         if board is None:
             board = self.board
         return evaluate_board(board)

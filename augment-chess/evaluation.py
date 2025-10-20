@@ -1,8 +1,26 @@
 # Chess Position Evaluation
+#
+# This module implements position evaluation for the chess engine. It assigns
+# a numerical score to a chess position from white's perspective:
+# - Positive scores favor white
+# - Negative scores favor black
+# - Zero indicates an equal position
+#
+# The evaluation considers:
+# - Material balance (piece values)
+# - Piece positioning (using piece-square tables)
+# - King safety and activity
+# - Pawn structure
+#
+# Piece-square tables encode positional values for each piece type on each square,
+# encouraging pieces to occupy strong squares (e.g., knights in the center, rooks
+# on open files, pawns advancing toward promotion).
 
 from utils import *
 
 # Piece-square tables for positional evaluation
+# Values are from white's perspective (flip for black pieces)
+# Higher values indicate better squares for the piece
 PAWN_TABLE = [
     0,  0,  0,  0,  0,  0,  0,  0,
     50, 50, 50, 50, 50, 50, 50, 50,
