@@ -22,9 +22,21 @@ import http.server
 import socketserver
 import webbrowser
 import urllib.parse
+import logging
 from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 from datetime import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('engine_battle.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Add both engine directories to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'augment-chess'))
@@ -54,10 +66,10 @@ try:
 
     # Clean up path
     sys.path = [p for p in sys.path if 'augment-chess' not in p]
-    print("Successfully imported Augment engine")
+    logger.info("Successfully imported Augment engine")
 
 except Exception as e:
-    print(f"Warning: Could not import Augment engine: {e}")
+    logger.warning(f"Could not import Augment engine: {e}")
 
 # Import Claude engine with proper isolation
 try:
@@ -77,10 +89,10 @@ try:
 
     # Clean up path
     sys.path = [p for p in sys.path if 'claude-chess' not in p]
-    print("Successfully imported Claude engine")
+    logger.info("Successfully imported Claude engine")
 
 except Exception as e:
-    print(f"Warning: Could not import Claude engine: {e}")
+    logger.warning(f"Could not import Claude engine: {e}")
 
 class HumanPlayer:
     """Simple human player interface"""
@@ -173,18 +185,18 @@ class EngineWrapper:
                 elapsed = time.time() - start_time
                 return move_str, elapsed
             except Exception as e:
-                print(f"Augment engine error: {e}")
+                logger.error(f"Augment engine error: {e}")
                 import traceback
-                print(f"Augment engine traceback: {traceback.format_exc()}")
+                logger.debug(f"Augment engine traceback: {traceback.format_exc()}")
                 return None, time.time() - start_time
 
         elif self.engine_type == "claude":
             try:
                 # Claude engine: get moves and pick the first one (simple strategy)
                 moves = self.engine.generate_moves()  # Fixed: correct method name
-                print(f"Claude moves generated: {len(moves) if moves else 0}")
+                logger.debug(f"Claude moves generated: {len(moves) if moves else 0}")
                 if moves:
-                    print(f"First move type: {type(moves[0])}, value: {repr(moves[0])}")
+                    logger.debug(f"First move type: {type(moves[0])}, value: {repr(moves[0])}")
                     # For now, just take the first legal move
                     # TODO: Add proper search algorithm integration
                     move_str = str(moves[0])  # Ensure it's a string
@@ -193,14 +205,14 @@ class EngineWrapper:
                 elapsed = time.time() - start_time
                 return move_str, elapsed
             except Exception as e:
-                print(f"Claude engine error: {e}")
+                logger.error(f"Claude engine error: {e}")
                 import traceback
-                print(f"Claude engine traceback: {traceback.format_exc()}")
+                logger.debug(f"Claude engine traceback: {traceback.format_exc()}")
                 return None, time.time() - start_time
 
         elif self.engine_type == "human":
             # Wait for human input
-            print(f"Waiting for human player move...")
+            logger.info("Waiting for human player move...")
             timeout = time_limit
             while timeout > 0:
                 move = self.engine.get_pending_move()
@@ -211,7 +223,7 @@ class EngineWrapper:
                 timeout -= 0.1
 
             # Timeout - no move received
-            print("Human player timeout")
+            logger.warning("Human player timeout")
             return None, time.time() - start_time
 
         return None, 0.0
@@ -227,7 +239,7 @@ class EngineWrapper:
                 return self.engine.make_move(move_str)
             return False
         except Exception as e:
-            print(f"Error making move {move_str} on {self.engine_type}: {e}")
+            logger.error(f"Error making move {move_str} on {self.engine_type}: {e}")
             return False
 
     def is_game_over(self) -> Tuple[bool, Optional[str]]:
@@ -271,7 +283,7 @@ class EngineWrapper:
                         else:
                             return True, "Draw by stalemate"
                     except Exception as e:
-                        print(f"Error checking for checkmate in Claude engine: {e}")
+                        logger.error(f"Error checking for checkmate in Claude engine: {e}")
                         # Fallback - assume stalemate if no moves and can't determine check
                         return True, "Draw by stalemate"
                 return False, None
@@ -280,7 +292,7 @@ class EngineWrapper:
                 return False, None
             return False, None
         except Exception as e:
-            print(f"Error checking game over for {self.engine_type}: {e}")
+            logger.error(f"Error checking game over for {self.engine_type}: {e}")
             return False, None
 
     def get_board_state(self) -> str:
@@ -382,7 +394,7 @@ class EngineBattle:
             current_engine = white_engine
             move_num = 1
 
-            print(f"Starting game: {game.white_engine} vs {game.black_engine}")
+            logger.info(f"Starting game: {game.white_engine} vs {game.black_engine}")
 
             while not self.stop_game.is_set():
                 # Check if game is over
@@ -391,46 +403,46 @@ class EngineBattle:
                     game.result = result
                     game.status = "finished"
                     game.end_time = datetime.now().isoformat()
-                    print(f"Game finished: {result}")
+                    logger.info(f"Game finished: {result}")
                     break
 
                 # Get move from current engine
-                print(f"Move {move_num}, {current_engine.engine_name} thinking...")
+                logger.debug(f"Move {move_num}, {current_engine.engine_name} thinking...")
                 move_str, time_taken = current_engine.get_best_move(depth, move_time)
 
                 if not move_str:
-                    print(f"=== ENGINE MOVE GENERATION ERROR ===", flush=True)
-                    print(f"ENGINE ERROR: {current_engine.engine_name} returned no move", flush=True)
-                    print(f"This likely indicates the engines are out of sync", flush=True)
+                    logger.error("=== ENGINE MOVE GENERATION ERROR ===")
+                    logger.error(f"ENGINE ERROR: {current_engine.engine_name} returned no move")
+                    logger.error("This likely indicates the engines are out of sync")
 
                     # Try to get available moves for debugging
                     try:
                         if current_engine.engine_type == "claude":
                             moves = current_engine.engine.generate_moves()
-                            print(f"Claude engine reports {len(moves) if moves else 0} available moves", flush=True)
+                            logger.debug(f"Claude engine reports {len(moves) if moves else 0} available moves")
                             if moves:
-                                print(f"Sample legal moves: {moves[:5]}", flush=True)
+                                logger.debug(f"Sample legal moves: {moves[:5]}")
                             else:
-                                print("Claude engine sees NO legal moves - may be checkmate/stalemate or invalid state", flush=True)
+                                logger.warning("Claude engine sees NO legal moves - may be checkmate/stalemate or invalid state")
                         elif current_engine.engine_type == "augment":
                             moves = current_engine.engine.get_legal_moves()
-                            print(f"Augment engine reports {len(moves) if moves else 0} available moves", flush=True)
+                            logger.debug(f"Augment engine reports {len(moves) if moves else 0} available moves")
                             if moves:
-                                print(f"Sample legal moves: {[str(m) for m in moves[:5]]}", flush=True)
+                                logger.debug(f"Sample legal moves: {[str(m) for m in moves[:5]]}")
                             else:
-                                print("Augment engine sees NO legal moves - may be checkmate/stalemate or invalid state", flush=True)
+                                logger.warning("Augment engine sees NO legal moves - may be checkmate/stalemate or invalid state")
 
                         # Check if this is actually game over vs. engine error
                         game_over, result = current_engine.is_game_over()
                         if game_over:
-                            print(f"Game is actually over: {result}", flush=True)
+                            logger.info(f"Game is actually over: {result}")
                             game.result = result
                         else:
-                            print("Game should not be over - this is an engine synchronization error", flush=True)
+                            logger.error("Game should not be over - this is an engine synchronization error")
                             game.result = f"Engine synchronization error: {current_engine.engine_name} could not generate a move (engines out of sync)"
 
                     except Exception as e:
-                        print(f"Could not get moves for debugging: {e}", flush=True)
+                        logger.error(f"Could not get moves for debugging: {e}")
                         game.result = f"Engine error: {current_engine.engine_name} could not generate a move"
 
                     game.status = "finished"
@@ -438,7 +450,7 @@ class EngineBattle:
 
                 # Validate the move looks reasonable (reduced debug output)
                 if len(move_str) == 5 and move_str[4].upper() in 'QRBN':
-                    print(f"Promotion move: {move_str}", flush=True)
+                    logger.debug(f"Promotion move: {move_str}")
 
                 # Clean up the move string to handle promotion properly
                 clean_move = move_str
@@ -453,16 +465,16 @@ class EngineBattle:
                 # Make move on both engines
                 current_success = current_engine.make_move(move_str)
                 if not current_success:
-                    print(f"INVALID MOVE DETECTED:", flush=True)
-                    print(f"  Engine: {current_engine.engine_name}", flush=True)
-                    print(f"  Move: {move_str}", flush=True)
+                    logger.error("INVALID MOVE DETECTED:")
+                    logger.error(f"  Engine: {current_engine.engine_name}")
+                    logger.error(f"  Move: {move_str}")
                     try:
-                        print(f"  Move details: from={move_str[:2]}, to={move_str[2:4]}")
-                        print(f"  Move type: {type(move_str)}")
-                        print(f"  Move length: {len(str(move_str))}")
+                        logger.debug(f"  Move details: from={move_str[:2]}, to={move_str[2:4]}")
+                        logger.debug(f"  Move type: {type(move_str)}")
+                        logger.debug(f"  Move length: {len(str(move_str))}")
                     except Exception as e:
-                        print(f"  Error parsing move details: {e}")
-                        print(f"  Raw move: {repr(move_str)}")
+                        logger.error(f"  Error parsing move details: {e}")
+                        logger.debug(f"  Raw move: {repr(move_str)}")
 
                     game.result = f"Invalid move by {current_engine.engine_name}: {move_str}"
                     game.status = "finished"
@@ -494,37 +506,37 @@ class EngineBattle:
                     alternatives_to_try.append(base_move + '=' + promotion_piece.lower())
 
                     for alternative in alternatives_to_try:
-                        print(f"Trying alternative format: {alternative}", flush=True)
+                        logger.debug(f"Trying alternative format: {alternative}")
                         other_success = other_engine.make_move(alternative)
                         if other_success:
-                            print(f"Move accepted with alternative format: {alternative}", flush=True)
+                            logger.info(f"Move accepted with alternative format: {alternative}")
                             break
                         else:
-                            print(f"Alternative {alternative} also rejected", flush=True)
+                            logger.debug(f"Alternative {alternative} also rejected")
 
                 if not other_success:
-                    print(f"=== CRITICAL ENGINE SYNCHRONIZATION ERROR ===", flush=True)
-                    print(f"CRITICAL: Move rejected by other engine: {move_str}", flush=True)
-                    print(f"Current engine: {current_engine.engine_name}", flush=True)
-                    print(f"Other engine: {other_engine.engine_name}", flush=True)
+                    logger.error("=== CRITICAL ENGINE SYNCHRONIZATION ERROR ===")
+                    logger.error(f"CRITICAL: Move rejected by other engine: {move_str}")
+                    logger.error(f"Current engine: {current_engine.engine_name}")
+                    logger.error(f"Other engine: {other_engine.engine_name}")
 
                     # Try to get legal moves from the rejecting engine for debugging
                     try:
                         if other_engine.engine_type == "claude":
                             other_moves = other_engine.engine.generate_moves()
-                            print(f"Claude engine has {len(other_moves) if other_moves else 0} legal moves")
+                            logger.debug(f"Claude engine has {len(other_moves) if other_moves else 0} legal moves")
                             if other_moves:
-                                print(f"Sample legal moves: {other_moves[:10]}")
+                                logger.debug(f"Sample legal moves: {other_moves[:10]}")
                         elif other_engine.engine_type == "augment":
                             other_moves = other_engine.engine.get_legal_moves()
-                            print(f"Augment engine has {len(other_moves) if other_moves else 0} legal moves")
+                            logger.debug(f"Augment engine has {len(other_moves) if other_moves else 0} legal moves")
                             if other_moves:
-                                print(f"Sample legal moves: {[str(m) for m in other_moves[:10]]}")
+                                logger.debug(f"Sample legal moves: {[str(m) for m in other_moves[:10]]}")
                     except Exception as e:
-                        print(f"Could not get legal moves from other engine: {e}")
+                        logger.error(f"Could not get legal moves from other engine: {e}")
 
                     # Stop the game due to synchronization error - engines are out of sync
-                    print(f"STOPPING GAME: Engines are out of sync and cannot continue reliably")
+                    logger.error("STOPPING GAME: Engines are out of sync and cannot continue reliably")
                     game.result = f"Engine synchronization error: {other_engine.engine_name} rejected {move_str} - engines have divergent board states"
                     game.status = "finished"
                     break
@@ -570,8 +582,8 @@ class EngineBattle:
                 )
                 game.moves.append(game_move)
 
-                print(f"Move {move_num}: {player} plays {move_notation} (took {time_taken:.2f}s)")
-                print(f"DEBUG: Stored move in game: {move_notation}", flush=True)
+                logger.info(f"Move {move_num}: {player} plays {move_notation} (took {time_taken:.2f}s)")
+                logger.debug(f"DEBUG: Stored move in game: {move_notation}")
 
                 # Switch to other player
                 current_engine = other_engine
@@ -586,8 +598,8 @@ class EngineBattle:
 
         except Exception as e:
             import traceback
-            print(f"Error in game: {e}")
-            print(f"Full traceback: {traceback.format_exc()}")
+            logger.error(f"Error in game: {e}")
+            logger.debug(f"Full traceback: {traceback.format_exc()}")
             game.result = f"Error: {e}"
             game.status = "finished"
             game.end_time = datetime.now().isoformat()
